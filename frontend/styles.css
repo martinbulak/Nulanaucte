@@ -1,0 +1,166 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700;900&family=Cinzel:wght@400;600;700&family=IM+Fell+English:ital@0;1&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* === FONTS === */
+  --font-display:  'Cinzel Decorative', serif;
+  --font-heading:  'Cinzel', serif;
+  --font-body:     'IM Fell English', Georgia, serif;
+  --font-ui:       'Cormorant Garamond', serif;
+
+  /* === COLORS === */
+  /* "ink" — always-dark, never themed (used for text on gold buttons + modal overlays) */
+  --color-ink:           #0a0608;
+
+  /* These names follow DESIGN.md but the values flip in light mode below. */
+  --color-void:          #0a0608;
+  --color-obsidian:      #110d10;
+  --color-stone:         #1c1620;
+  --color-dungeon:       #241d28;
+  --color-parchment:     #f4ead5;
+  --color-aged:          #e8d9b5;
+
+  --color-gold-dim:      #7a5c1e;
+  --color-gold:          #c9972a;
+  --color-gold-bright:   #f0c040;
+  --color-gold-glow:     #ffd700;
+
+  --color-crimson:       #8b1a1a;
+  --color-crimson-bright:#c0392b;
+  --color-cobalt:        #0f2d5e;
+  --color-cobalt-bright: #1a4a9c;
+  --color-emerald:       #0a3d1f;
+  --color-emerald-bright:#1a6b3a;
+
+  --color-magic:         #4fc3f7;
+  --color-fire:          #ff6b00;
+
+  --color-text-primary:  #f4ead5;
+  --color-text-secondary:#b8a98a;
+  --color-text-muted:    #7a6a52;
+  --color-text-accent:   #f0c040;
+
+  --color-border:        rgba(201,151,42,0.25);
+  --color-border-bright: rgba(201,151,42,0.6);
+  --color-border-dim:    rgba(201,151,42,0.1);
+
+  /* === SHADOWS === */
+  --shadow-gold:       0 0 8px rgba(201,151,42,0.4), 0 0 24px rgba(201,151,42,0.2), 0 0 60px rgba(201,151,42,0.08);
+  --shadow-gold-hover: 0 0 12px rgba(201,151,42,0.6), 0 0 40px rgba(201,151,42,0.3), 0 0 80px rgba(201,151,42,0.12);
+  --shadow-card:       0 8px 32px rgba(0,0,0,0.4);
+
+  /* === ANIMATIONS === */
+  --animate-unfurl: unfurl 0.7s cubic-bezier(0.22,1,0.36,1) both;
+  --animate-flicker: flicker 4s ease-in-out infinite;
+  --animate-float:   float 6s ease-in-out infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/* LIGHT MODE — "Pergamen pri sviečkovom svetle"                       */
+/* Overrides theme tokens for [data-theme="light"]. Don't touch        */
+/* --color-ink — that one stays dark for text-on-gold and overlays.    */
+/* ------------------------------------------------------------------ */
+:root[data-theme="light"] {
+  /* Surfaces (backgrounds) */
+  --color-void:          #faf3e0;  /* page bg */
+  --color-obsidian:      #fffef9;  /* cards */
+  --color-stone:         #f1e7cc;  /* subtle bg */
+  --color-dungeon:       #ede2c4;  /* toasts */
+
+  /* Gold — slightly darker for legibility on cream */
+  --color-gold-dim:      #5a4500;
+  --color-gold:          #a07820;
+  --color-gold-bright:   #b8842a;
+
+  /* Errors / info / success — keep close to dark mode (already readable on cream) */
+  --color-crimson-bright:#a52a2a;
+  --color-cobalt-bright: #1a4a9c;
+  --color-emerald-bright:#1a6b3a;
+
+  /* Text */
+  --color-text-primary:  #1c1620;
+  --color-text-secondary:#5a4527;
+  --color-text-muted:    #8a7350;
+  --color-text-accent:   #7a5c1e;
+
+  /* Borders — brown-tinted for visibility on cream */
+  --color-border:        rgba(122,92,30,0.35);
+  --color-border-bright: rgba(122,92,30,0.65);
+  --color-border-dim:    rgba(122,92,30,0.15);
+
+  /* Shadows — softer / warmer */
+  --shadow-gold:       0 0 8px rgba(160,120,32,0.25), 0 0 24px rgba(160,120,32,0.15);
+  --shadow-gold-hover: 0 0 12px rgba(160,120,32,0.4), 0 0 40px rgba(160,120,32,0.2);
+  --shadow-card:       0 8px 32px rgba(90,69,39,0.15);
+}
+
+@keyframes unfurl {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes flicker {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.85; }
+  75%      { opacity: 0.95; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-void text-text-primary font-body antialiased;
+  background-image:
+    radial-gradient(ellipse at 20% 50%, rgba(201,151,42,0.04) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(139,26,26,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 100%, rgba(15,45,94,0.04) 0%, transparent 55%);
+  background-attachment: fixed;
+  transition: background-color 0.4s ease;
+}
+
+/* Light mode body bg — warm parchment radial accents */
+:root[data-theme="light"] body {
+  background-image:
+    radial-gradient(ellipse at 20% 50%, rgba(160,120,32,0.10) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(139,26,26,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 100%, rgba(15,45,94,0.04) 0%, transparent 55%);
+}
+
+::selection {
+  background: rgba(201,151,42,0.35);
+  color: var(--color-parchment);
+}
+
+:root[data-theme="light"] ::selection {
+  background: rgba(160,120,32,0.35);
+  color: var(--color-ink);
+}
+
+/* Reveal stagger */
+.reveal   { animation: var(--animate-unfurl); }
+.reveal-1 { animation-delay: 0ms; }
+.reveal-2 { animation-delay: 80ms; }
+.reveal-3 { animation-delay: 160ms; }
+.reveal-4 { animation-delay: 240ms; }
+.reveal-5 { animation-delay: 320ms; }
+.reveal-6 { animation-delay: 400ms; }
+
+.float   { animation: var(--animate-float); }
+.flicker { animation: var(--animate-flicker); }
+
+/* Scrollbar */
+* { scrollbar-width: thin; scrollbar-color: rgba(201,151,42,0.3) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: rgba(201,151,42,0.25); border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(201,151,42,0.5); }
+
+:root[data-theme="light"] * { scrollbar-color: rgba(160,120,32,0.4) transparent; }
+:root[data-theme="light"] *::-webkit-scrollbar-thumb { background: rgba(160,120,32,0.35); }
+:root[data-theme="light"] *::-webkit-scrollbar-thumb:hover { background: rgba(160,120,32,0.6); }
