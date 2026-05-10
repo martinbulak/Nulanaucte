@@ -58,18 +58,24 @@ if (jwtRaw && jwtRaw.length >= 32) {
   )
 }
 
-// INBOUND_WEBHOOK_SECRET — required in production, optional in dev (with loud warning)
+// INBOUND_WEBHOOK_SECRET — recommended in production but not boot-blocker.
+// If missing in prod, the inbound webhook route itself will reject all requests
+// with 401 (see src/routes/inbound.ts → verifyWebhook). This lets the app boot
+// before Resend is fully configured.
 let inboundWebhookSecret: string | null = null
 const inboundRaw = _env.INBOUND_WEBHOOK_SECRET
 if (inboundRaw && inboundRaw.trim() !== '') {
   inboundWebhookSecret = inboundRaw
 } else if (isProd) {
-  throw new Error('[env] INBOUND_WEBHOOK_SECRET is required in production (Resend/Svix secret)')
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[env] INBOUND_WEBHOOK_SECRET not set in production — inbound email webhook ' +
+      'will reject all requests until set. App boot continues.',
+  )
 } else {
   // eslint-disable-next-line no-console
   console.warn(
-    '[env] INBOUND_WEBHOOK_SECRET not set — accepting unsigned webhooks in DEV ONLY. ' +
-      'This MUST be set before deploying.',
+    '[env] INBOUND_WEBHOOK_SECRET not set — accepting unsigned webhooks in DEV ONLY.',
   )
 }
 
