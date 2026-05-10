@@ -1,8 +1,8 @@
 import type { Context, Next } from 'hono'
 import { getCookie } from 'hono/cookie'
-import { COOKIE_NAME, verifySession } from '../lib/jwt'
-import { findUserById } from '../db'
-import type { SessionUser } from '../types'
+import { COOKIE_NAME, verifySession } from '../lib/jwt.js'
+import { findUserById } from '../db.js'
+import type { SessionUser } from '../types.js'
 
 declare module 'hono' {
   interface ContextVariableMap {

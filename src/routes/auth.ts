@@ -12,17 +12,17 @@ import {
   recordFailedLogin,
   setUserPassword,
   setUserVerified,
-} from '../db'
-import { hashPassword, verifyPassword } from '../lib/password'
-import { COOKIE_NAME, signSession, verifySession } from '../lib/jwt'
-import { requireAuth } from '../middleware/auth'
-import { rateLimit } from '../middleware/rateLimit'
-import { env } from '../env'
+} from '../db.js'
+import { hashPassword, verifyPassword } from '../lib/password.js'
+import { COOKIE_NAME, signSession, verifySession } from '../lib/jwt.js'
+import { requireAuth } from '../middleware/auth.js'
+import { rateLimit } from '../middleware/rateLimit.js'
+import { env } from '../env.js'
 import {
   passwordResetTemplate,
   sendEmail,
   verifyEmailTemplate,
-} from '../lib/email'
+} from '../lib/email.js'
 
 export const authRoutes = new Hono()
 

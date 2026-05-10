@@ -5,7 +5,7 @@ import {
   listIncomes,
   listMortgages,
   listTransactions,
-} from '../db'
+} from '../db.js'
 
 /**
  * GDPR-compliant data export — returns everything we have on the user as JSON.

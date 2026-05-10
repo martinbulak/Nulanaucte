@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
-import { requireAuth } from '../middleware/auth'
-import { findUserById, getAdminStats } from '../db'
+import { requireAuth } from '../middleware/auth.js'
+import { findUserById, getAdminStats } from '../db.js'
 
 export const adminRoutes = new Hono()
 

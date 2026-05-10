@@ -1,6 +1,6 @@
-import type { BankSource } from '../types'
-import { normalizeNumber, parseDateSk, makeFingerprint } from './parser-utils'
-import type { ParsedTransaction, ParseResult } from './csv-parsers'
+import type { BankSource } from '../types.js'
+import { normalizeNumber, parseDateSk, makeFingerprint } from './parser-utils.js'
+import type { ParsedTransaction, ParseResult } from './csv-parsers.js'
 
 // ---------- format detection ----------
 

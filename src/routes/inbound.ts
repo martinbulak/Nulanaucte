@@ -3,13 +3,13 @@ import {
   addTransaction,
   findBankBySource,
   findUserByInboundToken,
-} from '../db'
-import { detectPdfFormat, parsePdf } from '../lib/pdf-parsers'
-import { extractPdfText } from '../lib/pdf-extract'
-import { rateLimit } from '../middleware/rateLimit'
-import { bodyLimit } from '../middleware/bodyLimit'
-import { env } from '../env'
-import type { BankSource } from '../types'
+} from '../db.js'
+import { detectPdfFormat, parsePdf } from '../lib/pdf-parsers.js'
+import { extractPdfText } from '../lib/pdf-extract.js'
+import { rateLimit } from '../middleware/rateLimit.js'
+import { bodyLimit } from '../middleware/bodyLimit.js'
+import { env } from '../env.js'
+import type { BankSource } from '../types.js'
 
 export const inboundRoutes = new Hono()
 

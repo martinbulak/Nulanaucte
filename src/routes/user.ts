@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { deleteCookie } from 'hono/cookie'
-import { requireAuth } from '../middleware/auth'
+import { requireAuth } from '../middleware/auth.js'
 import {
   bumpTokenVersion,
   deleteUser,
@@ -8,11 +8,11 @@ import {
   regenerateInboundToken,
   setUserPassword,
   updateProfile,
-} from '../db'
-import { verifyPassword } from '../lib/password'
-import { COOKIE_NAME } from '../lib/jwt'
-import { env } from '../env'
-import type { ReportFrequency } from '../types'
+} from '../db.js'
+import { verifyPassword } from '../lib/password.js'
+import { COOKIE_NAME } from '../lib/jwt.js'
+import { env } from '../env.js'
+import type { ReportFrequency } from '../types.js'
 
 export const userRoutes = new Hono()
 

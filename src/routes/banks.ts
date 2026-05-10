@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
-import { requireAuth } from '../middleware/auth'
-import { createBank, listBanks, countTransactions } from '../db'
-import type { BankSource } from '../types'
+import { requireAuth } from '../middleware/auth.js'
+import { createBank, listBanks, countTransactions } from '../db.js'
+import type { BankSource } from '../types.js'
 
 export const banksRoutes = new Hono()
 

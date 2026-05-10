@@ -1,15 +1,15 @@
 import { Hono } from 'hono'
 import { eq } from 'drizzle-orm'
-import { db } from '../db-client'
-import { users } from '../schema'
+import { db } from '../db-client.js'
+import { users } from '../schema.js'
 import {
   categorySummary,
   listTransactions,
-} from '../db'
-import { sendEmail } from '../lib/email'
-import { generateRecommendations } from '../lib/ai'
-import { weeklyReportTemplate, monthlyReportTemplate } from '../lib/email-reports'
-import { env } from '../env'
+} from '../db.js'
+import { sendEmail } from '../lib/email.js'
+import { generateRecommendations } from '../lib/ai.js'
+import { weeklyReportTemplate, monthlyReportTemplate } from '../lib/email-reports.js'
+import { env } from '../env.js'
 
 export const reportsRoutes = new Hono()
 

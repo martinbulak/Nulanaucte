@@ -16,7 +16,7 @@
  * Runtime: nodejs (potrebné pre pdfjs-dist, ktoré nie je 100% Edge-compatible).
  */
 import { handle } from 'hono/vercel'
-import app from '../src/index'
+import app from '../src/index.js'
 
 export const config = {
   runtime: 'nodejs',

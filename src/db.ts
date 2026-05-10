@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull, sql as sqlOp } from 'drizzle-orm'
-import { db } from './db-client'
+import { db } from './db-client.js'
 import {
   users,
   banks,
@@ -8,8 +8,8 @@ import {
   incomes,
   userTokens,
   recommendations,
-} from './schema'
-import { hashPassword } from './lib/password'
+} from './schema.js'
+import { hashPassword } from './lib/password.js'
 import type {
   User,
   Bank,
@@ -20,7 +20,7 @@ import type {
   UserRole,
   ReportFrequency,
   CategorizedBy,
-} from './types'
+} from './types.js'
 
 // ---------------- Seeding (idempotent) ----------------
 

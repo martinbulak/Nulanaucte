@@ -1,4 +1,4 @@
-import type { SendEmailInput } from './email'
+import type { SendEmailInput } from './email.js'
 
 const eur = (n: number) =>
   new Intl.NumberFormat('sk-SK', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)

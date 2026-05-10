@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
-import { requireAuth } from '../middleware/auth'
-import { rateLimit } from '../middleware/rateLimit'
+import { requireAuth } from '../middleware/auth.js'
+import { rateLimit } from '../middleware/rateLimit.js'
 import {
   applyCategoryUpdates,
   categorySummary,
@@ -8,13 +8,13 @@ import {
   listTransactions,
   listUncategorizedTransactions,
   saveRecommendation,
-} from '../db'
+} from '../db.js'
 import {
   CATEGORIES,
   categorizeBatch,
   generateRecommendations,
   type Category,
-} from '../lib/ai'
+} from '../lib/ai.js'
 
 export const aiRoutes = new Hono()
 

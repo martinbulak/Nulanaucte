@@ -1,16 +1,16 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { env } from './env' // first import — fail at boot if envs missing
-import { authRoutes } from './routes/auth'
-import { banksRoutes } from './routes/banks'
-import { importsRoutes } from './routes/imports'
-import { mortgagesRoutes } from './routes/mortgages'
-import { inboundRoutes } from './routes/inbound'
-import { userRoutes } from './routes/user'
-import { aiRoutes } from './routes/ai'
-import { reportsRoutes } from './routes/reports'
-import { adminRoutes } from './routes/admin'
-import { requireAuth } from './middleware/auth'
+import { env } from './env.js' // first import — fail at boot if envs missing
+import { authRoutes } from './routes/auth.js'
+import { banksRoutes } from './routes/banks.js'
+import { importsRoutes } from './routes/imports.js'
+import { mortgagesRoutes } from './routes/mortgages.js'
+import { inboundRoutes } from './routes/inbound.js'
+import { userRoutes } from './routes/user.js'
+import { aiRoutes } from './routes/ai.js'
+import { reportsRoutes } from './routes/reports.js'
+import { adminRoutes } from './routes/admin.js'
+import { requireAuth } from './middleware/auth.js'
 import {
   deleteAllTransactions,
   ensureSeeded,
@@ -19,7 +19,7 @@ import {
   listMonthsWithData,
   listMortgages,
   listTransactions,
-} from './db'
+} from './db.js'
 
 const app = new Hono()
 

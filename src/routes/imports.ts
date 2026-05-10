@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
-import { requireAuth } from '../middleware/auth'
-import { addTransaction, findBank } from '../db'
-import { detectFormat, parseCsv } from '../lib/csv-parsers'
-import { detectPdfFormat, parsePdf } from '../lib/pdf-parsers'
-import { bodyLimit } from '../middleware/bodyLimit'
-import type { BankSource } from '../types'
+import { requireAuth } from '../middleware/auth.js'
+import { addTransaction, findBank } from '../db.js'
+import { detectFormat, parseCsv } from '../lib/csv-parsers.js'
+import { detectPdfFormat, parsePdf } from '../lib/pdf-parsers.js'
+import { bodyLimit } from '../middleware/bodyLimit.js'
+import type { BankSource } from '../types.js'
 
 export const importsRoutes = new Hono()
 

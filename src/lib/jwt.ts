@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from 'jose'
-import { env } from '../env'
-import type { SessionUser } from '../types'
+import { env } from '../env.js'
+import type { SessionUser } from '../types.js'
 
 const SECRET = new TextEncoder().encode(env.JWT_SECRET)
 

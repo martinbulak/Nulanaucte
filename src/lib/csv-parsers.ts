@@ -1,6 +1,6 @@
 import Papa from 'papaparse'
-import type { BankSource } from '../types'
-import { normalizeNumber, parseDateSk, makeFingerprint } from './parser-utils'
+import type { BankSource } from '../types.js'
+import { normalizeNumber, parseDateSk, makeFingerprint } from './parser-utils.js'
 
 export interface ParsedTransaction {
   date: string // ISO date YYYY-MM-DD
