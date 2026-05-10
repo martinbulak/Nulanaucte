@@ -9,6 +9,7 @@ import {
   type TrendPoint,
   type HBarItem,
 } from '../components/ui/Charts'
+import { RaulPanel } from '../components/ui/AIButtons'
 import { apiFetch } from '../utils/api'
 
 interface RecentTx {
@@ -333,6 +334,15 @@ export function Dashboard() {
           )}
         </Card>
       </div>
+
+      {/* Raul */}
+      {summary?.month && summary.counts.transactionsMonth > 0 && (
+        <div className="mb-12 reveal reveal-6">
+          <Card>
+            <RaulPanel month={summary.month} />
+          </Card>
+        </div>
+      )}
 
       {/* Two-column section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

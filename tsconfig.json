@@ -23,6 +23,6 @@
       "@server/*": ["./src/*"]
     }
   },
-  "include": ["frontend", "src"],
+  "include": ["frontend", "src", "api"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

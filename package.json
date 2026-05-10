@@ -9,14 +9,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@types/papaparse": "^5.5.2",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.6.14",
     "jose": "^5.9.6",
+    "openai": "^6.37.0",
     "papaparse": "^5.5.3",
     "pdfjs-dist": "^5.7.284",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.28.0"
+    "react-router-dom": "^6.28.0",
+    "resend": "^6.12.3"
   },
   "devDependencies": {
     "@hono/vite-dev-server": "^0.18.1",
@@ -25,6 +29,8 @@
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"

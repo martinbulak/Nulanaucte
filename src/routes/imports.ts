@@ -3,11 +3,17 @@ import { requireAuth } from '../middleware/auth'
 import { addTransaction, findBank } from '../db'
 import { detectFormat, parseCsv } from '../lib/csv-parsers'
 import { detectPdfFormat, parsePdf } from '../lib/pdf-parsers'
+import { bodyLimit } from '../middleware/bodyLimit'
 import type { BankSource } from '../types'
 
 export const importsRoutes = new Hono()
 
 importsRoutes.use('*', requireAuth)
+// Audit M1 — cap user-uploaded payloads at 8 MB (PDF base64 padded ≈ 6 MB raw)
+importsRoutes.use('*', bodyLimit(8 * 1024 * 1024))
+
+// Cap parsed rows so a malicious CSV with millions of lines can't blow up memory
+const MAX_PARSED_ROWS = 5000
 
 const VALID_SOURCES: BankSource[] = ['slsp', 'tatra', 'revolut', 'manual']
 
@@ -33,7 +39,7 @@ importsRoutes.post('/csv/preview', async (c) => {
   if (!Number.isFinite(bankId) || !csv) {
     return c.json({ ok: false, error: 'bankId a csv sú povinné' }, 400)
   }
-  const bank = findBank(user.id, bankId)
+  const bank = await findBank(user.id, bankId)
   if (!bank) return c.json({ ok: false, error: 'Banka nenájdená' }, 404)
 
   const hint = pickSource(body, bank.source as BankSource)
@@ -66,7 +72,7 @@ importsRoutes.post('/csv', async (c) => {
   if (!Number.isFinite(bankId) || !csv) {
     return c.json({ ok: false, error: 'bankId a csv sú povinné' }, 400)
   }
-  const bank = findBank(user.id, bankId)
+  const bank = await findBank(user.id, bankId)
   if (!bank) return c.json({ ok: false, error: 'Banka nenájdená' }, 404)
 
   const hint = pickSource(body, bank.source as BankSource)
@@ -74,8 +80,11 @@ importsRoutes.post('/csv', async (c) => {
 
   let imported = 0
   let duplicates = 0
-  for (const row of result.rows) {
-    const r = addTransaction({
+  const rows = result.rows.slice(0, MAX_PARSED_ROWS)
+  for (const row of rows) {
+    if (!Number.isFinite(row.amount) || Math.abs(row.amount) > 1_000_000) continue
+    if (typeof row.description !== 'string' || row.description.length > 500) continue
+    const r = await addTransaction({
       userId: user.id,
       bankId,
       amount: row.amount,
@@ -92,7 +101,7 @@ importsRoutes.post('/csv', async (c) => {
     data: {
       kind: 'csv',
       usedFormat: result.source,
-      total: result.rows.length,
+      total: rows.length,
       imported,
       duplicates,
       errors: result.errors,
@@ -115,7 +124,7 @@ importsRoutes.post('/pdf/preview', async (c) => {
   if (!Number.isFinite(bankId) || !text) {
     return c.json({ ok: false, error: 'bankId a text sú povinné' }, 400)
   }
-  const bank = findBank(user.id, bankId)
+  const bank = await findBank(user.id, bankId)
   if (!bank) return c.json({ ok: false, error: 'Banka nenájdená' }, 404)
 
   const hint = pickSource(body, bank.source as BankSource)
@@ -148,7 +157,7 @@ importsRoutes.post('/pdf', async (c) => {
   if (!Number.isFinite(bankId) || !text) {
     return c.json({ ok: false, error: 'bankId a text sú povinné' }, 400)
   }
-  const bank = findBank(user.id, bankId)
+  const bank = await findBank(user.id, bankId)
   if (!bank) return c.json({ ok: false, error: 'Banka nenájdená' }, 404)
 
   const hint = pickSource(body, bank.source as BankSource)
@@ -156,8 +165,11 @@ importsRoutes.post('/pdf', async (c) => {
 
   let imported = 0
   let duplicates = 0
-  for (const row of result.rows) {
-    const r = addTransaction({
+  const rows = result.rows.slice(0, MAX_PARSED_ROWS)
+  for (const row of rows) {
+    if (!Number.isFinite(row.amount) || Math.abs(row.amount) > 1_000_000) continue
+    if (typeof row.description !== 'string' || row.description.length > 500) continue
+    const r = await addTransaction({
       userId: user.id,
       bankId,
       amount: row.amount,
@@ -174,7 +186,7 @@ importsRoutes.post('/pdf', async (c) => {
     data: {
       kind: 'pdf',
       usedFormat: result.source,
-      total: result.rows.length,
+      total: rows.length,
       imported,
       duplicates,
       errors: result.errors,

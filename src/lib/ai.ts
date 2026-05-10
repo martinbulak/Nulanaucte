@@ -1,0 +1,272 @@
+import OpenAI from 'openai'
+import { env } from '../env'
+
+let openaiClient: OpenAI | null = null
+function getClient(): OpenAI | null {
+  if (!env.OPENAI_API_KEY) return null
+  if (!openaiClient) openaiClient = new OpenAI({ apiKey: env.OPENAI_API_KEY })
+  return openaiClient
+}
+
+const MODEL = 'gpt-4o-mini' // cheap + fast, good enough for this domain
+
+// Canonical category list (must match UI / dashboard).
+export const CATEGORIES = [
+  'Potraviny',
+  'Reštaurácie a kaviarne',
+  'Tankovanie',
+  'Auto a doprava',
+  'Bývanie',
+  'Energie',
+  'Telekomunikácie',
+  'Zdravie',
+  'Oblečenie',
+  'Zábava',
+  'Predplatné',
+  'Príjem',
+  'Výber z bankomatu',
+  'Prevody medzi účtami',
+  'Splátky a úvery',
+  'Poistenie',
+  'Iné',
+] as const
+export type Category = (typeof CATEGORIES)[number]
+
+// ---------------- CATEGORIZATION ----------------
+
+export interface TxToCategorize {
+  id: number
+  date: string
+  note: string
+  amount: number // signed
+  type: 'prijem' | 'vydavok'
+}
+
+export interface CategorizedTx {
+  id: number
+  category: Category
+  confidence: number // 0..1
+}
+
+/** Rule-based fallback that runs in dev when no OPENAI_API_KEY is set. */
+function ruleBased(tx: TxToCategorize): CategorizedTx {
+  const note = tx.note.toLowerCase()
+  if (tx.type === 'prijem') {
+    if (/mzda|výplata|vyplata|salary|payroll|dividend/i.test(note))
+      return { id: tx.id, category: 'Príjem', confidence: 0.85 }
+    return { id: tx.id, category: 'Príjem', confidence: 0.5 }
+  }
+  // Výdavky — heuristics
+  const map: Array<[RegExp, Category, number]> = [
+    [/(slovnaft|omv|shell|orlen|jurki|petrol|čerpacia|cerpacia)/i, 'Tankovanie', 0.95],
+    [/(kaufland|lidl|tesco|billa|coop|terno|fresh\b|hypermarket)/i, 'Potraviny', 0.95],
+    [/(mcdonald|kfc|burger|pizza|wolt|bolt food|bistro|reštauráci|restaurac|kaviar|coffee|starbucks|kebab|sushi|gastro)/i, 'Reštaurácie a kaviarne', 0.9],
+    [/(netflix|spotify|apple|google|youtube|microsoft|adobe|notion|figma|github|slack|chatgpt|openai|cursor)/i, 'Predplatné', 0.92],
+    [/(bolt\b|uber|hopin|taxi|mhd|sad|zssk|lístok|vlak)/i, 'Auto a doprava', 0.88],
+    [/(o2|orange|telekom|4ka|vodafone|antik|swan|metronet|internet)/i, 'Telekomunikácie', 0.9],
+    [/(stredoslovenská|sse|spp|vse|zse|elektrina|plyn|voda|energie|ssb)/i, 'Energie', 0.9],
+    [/(dr.?max|lekáreň|lekaren|apotek|lekár|lekar|nemocnic|topdoktor|etabletka)/i, 'Zdravie', 0.85],
+    [/(zara|h&m|hm\b|reserved|c&a|primark|nike|adidas|oblečenie|obuv|footshop)/i, 'Oblečenie', 0.85],
+    [/(výber|vyber|bankomat|atm)/i, 'Výber z bankomatu', 0.95],
+    [/(splátka|splatka|úver|uver|hypotéka|hypoteka|sporopay)/i, 'Splátky a úvery', 0.8],
+    [/(poistenie|alianz|allianz|generali|kooperativa|insurance)/i, 'Poistenie', 0.92],
+    [/(byt|bytový|spravca|fond opráv|nájom|najom)/i, 'Bývanie', 0.85],
+    [/(kino|divadlo|aquapark|aqualand|wellness|spa|park|múzeum|muzeum|funicular|ticket|book|concert)/i, 'Zábava', 0.7],
+  ]
+  for (const [re, cat, conf] of map) {
+    if (re.test(note)) return { id: tx.id, category: cat, confidence: conf }
+  }
+  return { id: tx.id, category: 'Iné', confidence: 0.3 }
+}
+
+const SYSTEM_PROMPT = `Si finančný asistent appky "Nula na účte". Tvoja jediná úloha: priradiť každej transakcii kategóriu z predpísaného zoznamu.
+
+Pravidlá:
+- Vráť LEN platný JSON: {"items":[{"id":1,"category":"Potraviny","confidence":0.95}, ...]}
+- "category" musí byť presne jedna z hodnôt zo zoznamu nižšie. Ak si si nie istý → "Iné" s confidence pod 0.5.
+- "confidence" je číslo 0..1.
+- Ignoruj ID, ktoré nedostaneš.
+- Žiadny iný text, žiadne markdown, žiadne komentáre.
+
+Slovenské heuristiky:
+- Tesco/Lidl/Kaufland/Billa/COOP → Potraviny
+- McDonald/KFC/pizza/Wolt/bistro/kaviareň → Reštaurácie a kaviarne
+- Slovnaft/OMV/Shell → Tankovanie
+- Bolt/Uber/MHD/ZSSK → Auto a doprava
+- O2/Orange/Telekom/4ka → Telekomunikácie
+- SSE/SPP/VSE/ZSE → Energie
+- Lekáreň/Dr. Max → Zdravie
+- Netflix/Spotify/Google/Apple/Adobe → Predplatné
+- Mzda/výplata/dividenda → Príjem (typ je už označený)
+- Výber/bankomat → Výber z bankomatu
+- Splátka/úver/hypotéka → Splátky a úvery
+- Allianz/Generali/Kooperativa → Poistenie
+- Bytový dom/správca/nájom → Bývanie
+
+Zoznam kategórií:
+${CATEGORIES.join('\n')}`
+
+/**
+ * Categorizes a batch of transactions. Uses GPT-4o-mini if OPENAI_API_KEY is set,
+ * otherwise falls back to rule-based matching (works offline).
+ */
+export async function categorizeBatch(
+  txs: TxToCategorize[],
+): Promise<{ items: CategorizedTx[]; usedAI: boolean; tokens?: number }> {
+  if (txs.length === 0) return { items: [], usedAI: false }
+
+  const client = getClient()
+  if (!client) {
+    return { items: txs.map(ruleBased), usedAI: false }
+  }
+
+  // Strip data — send only id + minimal fields. Don't send IBANs or VS numbers.
+  const minimal = txs.map((t) => ({
+    id: t.id,
+    type: t.type,
+    amount: Math.abs(t.amount),
+    note: t.note.slice(0, 120),
+  }))
+
+  try {
+    const res = await client.chat.completions.create({
+      model: MODEL,
+      temperature: 0.1,
+      max_tokens: Math.min(2000, 60 * txs.length),
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: `Priraď kategóriu ku každej z týchto transakcií:\n${JSON.stringify(minimal)}`,
+        },
+      ],
+    })
+    const raw = res.choices[0]?.message?.content ?? '{"items":[]}'
+    const parsed = JSON.parse(raw) as { items?: Array<{ id?: number; category?: string; confidence?: number }> }
+    const items: CategorizedTx[] = []
+    if (Array.isArray(parsed.items)) {
+      const validSet = new Set<string>(CATEGORIES)
+      for (const it of parsed.items) {
+        if (typeof it.id !== 'number') continue
+        if (typeof it.category !== 'string' || !validSet.has(it.category)) continue
+        const conf = typeof it.confidence === 'number' ? Math.max(0, Math.min(1, it.confidence)) : 0.5
+        items.push({ id: it.id, category: it.category as Category, confidence: conf })
+      }
+    }
+    return { items, usedAI: true, tokens: res.usage?.total_tokens }
+  } catch (e) {
+    console.error('[ai] categorize failed, falling back to rules:', e instanceof Error ? e.message : e)
+    return { items: txs.map(ruleBased), usedAI: false }
+  }
+}
+
+// ---------------- RAUL RECOMMENDATIONS ----------------
+
+export interface SpendingSummaryInput {
+  monthLabel: string // e.g. "Apríl 2026"
+  totalIncome: number
+  totalExpense: number
+  topCategories: Array<{ category: string; total: number; count: number }>
+  changeVsLast: Array<{ category: string; delta: number; pct: number }> // delta = current - last
+  largestTransactions: Array<{ note: string; amount: number; date: string; category: string }>
+}
+
+const RAUL_PROMPT = `Si Raul Rodriguez — sympatický, mierne sarkastický finančný kamarát so cigarou v ruke a slovinskou vychovou. Hovoríš po slovensky, hravo, jemne magicky/harrypotterovsky, ale ZÁSADNE NIKDY neradíš investície, úvery alebo poistenie. Iba pozeráš na míňanie a navrhuješ ako utiahnuť opasok bez toho aby si znel ako zúrivý kazateľ.
+
+Štýl:
+- Krátko, 4-6 odrážok max
+- Konkrétne sumy a kategórie z dát
+- Jeden-dva vtipy max, žiadny moralizmus
+- Občas odkáž na "Raula", "galeóny", "Apparátora", "dementora", "Wolt nie je člen domácnosti"
+- Slovenčina
+
+NIKDY NEROB:
+- finančné rady (investície, úvery, poistenia)
+- diagnostika "máte problém", "musíte"
+- príkazy v 2. osobe ("musíš", "máš")
+- emoji bombu (max 1-2 v celej odpovedi)
+
+Vráť LEN markdown text. Žiadne JSON, žiadny komentár navyše.`
+
+/**
+ * Generates Raul's recommendations as markdown for a given month.
+ * Falls back to a deterministic stub if no OPENAI_API_KEY.
+ */
+export async function generateRecommendations(
+  input: SpendingSummaryInput,
+): Promise<{ content: string; usedAI: boolean }> {
+  const client = getClient()
+  if (!client) {
+    return { content: stubRecommendations(input), usedAI: false }
+  }
+
+  try {
+    const res = await client.chat.completions.create({
+      model: MODEL,
+      temperature: 0.7,
+      max_tokens: 600,
+      messages: [
+        { role: 'system', content: RAUL_PROMPT },
+        {
+          role: 'user',
+          content: `Mesiac: ${input.monthLabel}
+Príjmy: ${input.totalIncome.toFixed(0)} €
+Výdavky: ${input.totalExpense.toFixed(0)} €
+Bilancia: ${(input.totalIncome - input.totalExpense).toFixed(0)} €
+
+Top kategórie výdavkov:
+${input.topCategories.map((c) => `- ${c.category}: ${c.total.toFixed(0)} € (${c.count}×)`).join('\n')}
+
+Zmena oproti predošlému mesiacu:
+${
+  input.changeVsLast.length === 0
+    ? '(žiadne dáta z predošlého mesiaca)'
+    : input.changeVsLast
+        .map((c) => `- ${c.category}: ${c.delta > 0 ? '+' : ''}${c.delta.toFixed(0)} € (${c.pct > 0 ? '+' : ''}${c.pct.toFixed(0)} %)`)
+        .join('\n')
+}
+
+Najväčšie jednotlivé transakcie:
+${input.largestTransactions.map((t) => `- ${t.date} · ${t.note} · ${t.amount.toFixed(0)} € (${t.category})`).join('\n')}
+
+Vyrob krátky komentár v Raulovom štýle.`,
+        },
+      ],
+    })
+    const content = (res.choices[0]?.message?.content ?? '').trim()
+    if (!content) return { content: stubRecommendations(input), usedAI: false }
+    return { content, usedAI: true }
+  } catch (e) {
+    console.error('[ai] raul failed, falling back to stub:', e instanceof Error ? e.message : e)
+    return { content: stubRecommendations(input), usedAI: false }
+  }
+}
+
+function stubRecommendations(input: SpendingSummaryInput): string {
+  const top = input.topCategories[0]
+  const bilancia = input.totalIncome - input.totalExpense
+  const lines: string[] = []
+  lines.push(`**Raul si pozrel ${input.monthLabel}** (offline mód, žiadny AI):`)
+  lines.push('')
+  if (bilancia >= 0) {
+    lines.push(`- Bilancia ${bilancia.toFixed(0)} € v pluse — Apparátor sa neusmieva, ale ani nezúri.`)
+  } else {
+    lines.push(`- Bilancia ${bilancia.toFixed(0)} € v mínuse. Apparátor zdvihol obočie.`)
+  }
+  if (top) {
+    lines.push(`- Najviac galeónov spadlo do **${top.category}** (${top.total.toFixed(0)} €, ${top.count} pohybov).`)
+  }
+  for (const c of input.changeVsLast.slice(0, 2)) {
+    if (Math.abs(c.pct) >= 20) {
+      lines.push(
+        `- **${c.category}** ${c.pct > 0 ? 'vystrelilo' : 'kleslo'} o ${Math.abs(c.pct).toFixed(0)} % oproti minulému mesiacu.`,
+      )
+    }
+  }
+  lines.push('')
+  lines.push(
+    '_Pre živé Raulove odporúčania nastav `OPENAI_API_KEY` v env. Toto je len ukážka._',
+  )
+  return lines.join('\n')
+}

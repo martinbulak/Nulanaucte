@@ -2,14 +2,28 @@ export type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: string }
 
+export type UserRole = 'user' | 'admin'
+export type ReportFrequency = 'weekly' | 'monthly' | 'off'
+
 export interface User {
   id: number
   email: string
   passwordHash: string
   salt: string
+  name: string | null
+  role: UserRole
+  emailVerified: boolean
+  reportFrequency: ReportFrequency
+  emailNotifications: boolean
   inboundToken: string
   inboundSlug: string
+  // Server-side revocation: bumped on logout-everywhere / password change
+  tokenVersion: number
+  // Brute-force protection
+  failedLogins: number
+  lockedUntil: number | null // epoch ms
   createdAt: string
+  updatedAt: string
 }
 
 export interface SessionUser {
@@ -43,6 +57,8 @@ export interface Income {
   createdAt: string
 }
 
+export type CategorizedBy = 'system' | 'ai' | 'user'
+
 export interface Transaction {
   id: number
   userId: number
@@ -53,6 +69,8 @@ export interface Transaction {
   date: string
   note: string | null
   fingerprint: string | null
+  aiConfidence: number | null
+  categorizedBy: CategorizedBy
   createdAt: string
 }
 

@@ -1,10 +1,15 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { env } from './env' // first import — fail at boot if envs missing
 import { authRoutes } from './routes/auth'
 import { banksRoutes } from './routes/banks'
 import { importsRoutes } from './routes/imports'
 import { mortgagesRoutes } from './routes/mortgages'
 import { inboundRoutes } from './routes/inbound'
 import { userRoutes } from './routes/user'
+import { aiRoutes } from './routes/ai'
+import { reportsRoutes } from './routes/reports'
+import { adminRoutes } from './routes/admin'
 import { requireAuth } from './middleware/auth'
 import {
   deleteAllTransactions,
@@ -18,6 +23,19 @@ import {
 
 const app = new Hono()
 
+// Audit M9 — explicit CORS. Same-origin in our deploy, but be explicit:
+// only the configured PUBLIC_ORIGIN can hit /api/* with credentials.
+app.use(
+  '/api/*',
+  cors({
+    origin: env.PUBLIC_ORIGIN,
+    credentials: true,
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type'],
+    maxAge: 600,
+  }),
+)
+
 app.use('*', async (c, next) => {
   await ensureSeeded()
   await next()
@@ -28,6 +46,9 @@ app.route('/api/banks', banksRoutes)
 app.route('/api/imports', importsRoutes)
 app.route('/api/mortgages', mortgagesRoutes)
 app.route('/api/user', userRoutes)
+app.route('/api/ai', aiRoutes)
+app.route('/api/reports', reportsRoutes)
+app.route('/api/admin', adminRoutes)
 // Public webhook (no auth — verified via Svix HMAC at the route level)
 app.route('/api/inbound', inboundRoutes)
 
@@ -43,7 +64,7 @@ function pickDefaultMonth(months: string[]): string {
 
 app.get('/api/months', requireAuth, async (c) => {
   const user = c.get('user')
-  const months = listMonthsWithData(user.id)
+  const months = await listMonthsWithData(user.id)
   return c.json({ ok: true, data: months })
 })
 
@@ -56,23 +77,25 @@ app.get('/api/transactions', requireAuth, async (c) => {
   const type = typeRaw === 'prijem' || typeRaw === 'vydavok' ? typeRaw : undefined
   const bankId = bankIdRaw ? Number(bankIdRaw) : undefined
   const limit = limitRaw ? Math.max(1, Math.min(2000, Number(limitRaw))) : 500
-  const txs = listTransactions(user.id, { bankId, month, type }).slice(0, limit)
+  const txs = (await listTransactions(user.id, { bankId, month, type })).slice(0, limit)
   return c.json({ ok: true, data: txs })
 })
 
 app.delete('/api/transactions', requireAuth, async (c) => {
   const user = c.get('user')
-  const result = deleteAllTransactions(user.id)
+  const result = await deleteAllTransactions(user.id)
   return c.json({ ok: true, data: result })
 })
 
 app.get('/api/dashboard/summary', requireAuth, async (c) => {
   const user = c.get('user')
-  const banks = listBanks(user.id)
-  const incomes = listIncomes(user.id)
-  const mortgages = listMortgages(user.id)
-  const allTxs = listTransactions(user.id)
-  const months = listMonthsWithData(user.id)
+  const [banks, incomes, mortgages, allTxs, months] = await Promise.all([
+    listBanks(user.id),
+    listIncomes(user.id),
+    listMortgages(user.id),
+    listTransactions(user.id),
+    listMonthsWithData(user.id),
+  ])
 
   const month = parseMonth(c.req.query('month')) ?? pickDefaultMonth(months)
   const monthTxs = allTxs.filter((t) => t.date.startsWith(month))
@@ -129,8 +152,10 @@ app.get('/api/dashboard/trend', requireAuth, async (c) => {
   const monthsRaw = Number(c.req.query('months'))
   const want = Number.isFinite(monthsRaw) ? Math.max(1, Math.min(24, monthsRaw)) : 6
 
-  const allTxs = listTransactions(user.id)
-  const dataMonthsDesc = listMonthsWithData(user.id) // sorted desc
+  const [allTxs, dataMonthsDesc] = await Promise.all([
+    listTransactions(user.id),
+    listMonthsWithData(user.id),
+  ])
 
   // Pick the most recent N months that have data, then fill towards current month
   // so the chart has a stable rolling window even if user only has 1-2 months.
@@ -177,8 +202,18 @@ app.get('/api/dashboard/trend', requireAuth, async (c) => {
 app.notFound((c) => c.json({ ok: false, error: 'Not found' }, 404))
 
 app.onError((err, c) => {
-  console.error('[server] error', err)
-  return c.json({ ok: false, error: 'Internal server error' }, 500)
+  // Audit M11 — log only error name + message in prod (no full stack with PII).
+  // Generate a correlation ID so users can report issues without exposing details.
+  const correlationId = Math.random().toString(36).slice(2, 10)
+  if (env.isProd) {
+    console.error(`[server] [${correlationId}] ${err.name}: ${err.message}`)
+  } else {
+    console.error(`[server] [${correlationId}]`, err)
+  }
+  return c.json(
+    { ok: false, error: 'Internal server error', ref: correlationId },
+    500,
+  )
 })
 
 export default app

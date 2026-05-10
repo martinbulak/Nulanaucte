@@ -113,6 +113,19 @@ export function InboundEmailWidget() {
     )
   }
 
+  // Audit L5 — defensive runtime regex on slug/token before render. The server
+  // generates these from a fixed alphabet, but if anything ever lets a custom
+  // string through, this trips before XSS becomes possible.
+  if (!/^[a-z0-9-]{1,32}$/i.test(data.slug) || !/^[a-z0-9]{1,64}$/i.test(data.token)) {
+    return (
+      <Card>
+        <p className="font-body text-sm text-crimson-bright">
+          Neplatná štruktúra inbound adresy — odhlás sa a prihlás znova.
+        </p>
+      </Card>
+    )
+  }
+
   return (
     <Card>
       <div className="flex items-start justify-between mb-4">

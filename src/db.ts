@@ -1,248 +1,495 @@
+import { and, desc, eq, isNull, sql as sqlOp } from 'drizzle-orm'
+import { db } from './db-client'
+import {
+  users,
+  banks,
+  transactions,
+  mortgages,
+  incomes,
+  userTokens,
+  recommendations,
+} from './schema'
 import { hashPassword } from './lib/password'
-import type { User, Bank, Income, Transaction, Mortgage } from './types'
+import type {
+  User,
+  Bank,
+  Income,
+  Transaction,
+  Mortgage,
+  BankSource,
+  UserRole,
+  ReportFrequency,
+  CategorizedBy,
+} from './types'
 
-interface Store {
-  users: User[]
-  banks: Bank[]
-  incomes: Income[]
-  transactions: Transaction[]
-  mortgages: Mortgage[]
-  fingerprints: Set<string>
-  seq: { user: number; bank: number; income: number; transaction: number; mortgage: number }
-}
+// ---------------- Seeding (idempotent) ----------------
 
-const store: Store = {
-  users: [],
-  banks: [],
-  incomes: [],
-  transactions: [],
-  mortgages: [],
-  fingerprints: new Set<string>(),
-  seq: { user: 0, bank: 0, income: 0, transaction: 0, mortgage: 0 },
-}
-
-let seeded = false
-
+let seedingDone = false
 const DEFAULT_BANKS: Array<{ name: string; type: string; source: BankSource }> = [
   { name: 'Slovenská sporiteľňa', type: 'bezny', source: 'slsp' },
   { name: 'Tatra banka', type: 'bezny', source: 'tatra' },
   { name: 'Revolut', type: 'bezny', source: 'revolut' },
 ]
 
-export type BankSource = 'slsp' | 'tatra' | 'revolut' | 'manual'
-
 export async function ensureSeeded(): Promise<void> {
-  if (seeded) return
-  seeded = true
-
-  if (!store.users.find((u) => u.email === 'koduvanica')) {
-    const { salt, hash } = await hashPassword('koduvanica')
-    const user: User = {
-      id: ++store.seq.user,
+  if (seedingDone) return
+  // Check whether the seed user already exists (case-insensitive)
+  const existing = await findUserByEmail('koduvanica')
+  if (existing) {
+    // Make sure pre-existing seed user is verified (older seeds may have been created
+    // before the emailVerified column existed)
+    if (!existing.emailVerified) {
+      await db.update(users).set({ emailVerified: true }).where(eq(users.id, existing.id))
+    }
+    seedingDone = true
+    return
+  }
+  const { salt, hash } = await hashPassword('koduvanica')
+  const [user] = await db
+    .insert(users)
+    .values({
       email: 'koduvanica',
       passwordHash: hash,
       salt,
+      name: 'Koduvanica (dev)',
+      emailVerified: true, // dev seed user — skip verification flow
       inboundToken: generateToken(),
       inboundSlug: makeSlug('koduvanica'),
-      createdAt: new Date().toISOString(),
-    }
-    store.users.push(user)
+    })
+    .returning()
 
+  if (user) {
     for (const b of DEFAULT_BANKS) {
-      store.banks.push({
-        id: ++store.seq.bank,
+      await db.insert(banks).values({
         userId: user.id,
         name: b.name,
         type: b.type,
-        balance: 0,
-        currency: 'EUR',
         source: b.source,
-        createdAt: new Date().toISOString(),
       })
     }
   }
+  seedingDone = true
 }
 
-export function findUserByEmail(email: string): User | undefined {
-  return store.users.find((u) => u.email.toLowerCase() === email.toLowerCase())
+// ---------------- USERS ----------------
+
+function rowToUser(r: typeof users.$inferSelect): User {
+  return {
+    id: r.id,
+    email: r.email,
+    passwordHash: r.passwordHash,
+    salt: r.salt,
+    name: r.name,
+    role: r.role as UserRole,
+    emailVerified: r.emailVerified,
+    reportFrequency: r.reportFrequency as ReportFrequency,
+    emailNotifications: r.emailNotifications,
+    inboundToken: r.inboundToken,
+    inboundSlug: r.inboundSlug,
+    tokenVersion: r.tokenVersion,
+    failedLogins: r.failedLogins,
+    lockedUntil: r.lockedUntil,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  }
 }
 
-export function findUserById(id: number): User | undefined {
-  return store.users.find((u) => u.id === id)
+export async function findUserByEmail(email: string): Promise<User | undefined> {
+  const [r] = await db
+    .select()
+    .from(users)
+    .where(sqlOp`lower(${users.email}) = lower(${email})`)
+    .limit(1)
+  return r ? rowToUser(r) : undefined
 }
 
-export function findUserByInboundToken(token: string): User | undefined {
+export async function findUserById(id: number): Promise<User | undefined> {
+  const [r] = await db.select().from(users).where(eq(users.id, id)).limit(1)
+  return r ? rowToUser(r) : undefined
+}
+
+export async function findUserByInboundToken(token: string): Promise<User | undefined> {
   if (!token) return undefined
-  const lower = token.toLowerCase()
-  return store.users.find((u) => u.inboundToken.toLowerCase() === lower)
+  const [r] = await db
+    .select()
+    .from(users)
+    .where(sqlOp`lower(${users.inboundToken}) = lower(${token})`)
+    .limit(1)
+  return r ? rowToUser(r) : undefined
 }
 
-export function regenerateInboundToken(userId: number): string | null {
-  const u = store.users.find((x) => x.id === userId)
-  if (!u) return null
-  u.inboundToken = generateToken()
-  return u.inboundToken
+export async function regenerateInboundToken(userId: number): Promise<string | null> {
+  const newToken = generateToken()
+  const [r] = await db
+    .update(users)
+    .set({ inboundToken: newToken })
+    .where(eq(users.id, userId))
+    .returning({ inboundToken: users.inboundToken })
+  return r?.inboundToken ?? null
 }
 
-// 6-char base32-ish token (no ambiguous chars 0/o/1/l)
-const TOKEN_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'
-function generateToken(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(6))
-  let out = ''
-  for (let i = 0; i < 6; i++) out += TOKEN_ALPHABET[bytes[i] % TOKEN_ALPHABET.length]
-  return out
+export async function bumpTokenVersion(userId: number): Promise<number | null> {
+  const [r] = await db
+    .update(users)
+    .set({ tokenVersion: sqlOp`${users.tokenVersion} + 1` })
+    .where(eq(users.id, userId))
+    .returning({ tokenVersion: users.tokenVersion })
+  return r?.tokenVersion ?? null
 }
 
-function makeSlug(raw: string): string {
-  // First part of email (before @), sanitized to [a-z0-9-], max 16 chars
-  const local = raw.split('@')[0].toLowerCase()
-  const cleaned = local
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 16)
-  return cleaned || 'user'
+export async function recordFailedLogin(userId: number, lockMs: number): Promise<void> {
+  // Atomic increment + conditional lock
+  await db.execute(sqlOp`
+    UPDATE ${users}
+    SET failed_logins = failed_logins + 1,
+        locked_until = CASE
+          WHEN failed_logins + 1 >= 5 THEN ${Date.now() + lockMs}
+          ELSE locked_until
+        END
+    WHERE id = ${userId}
+  `)
 }
 
-// Banks
-export function listBanks(userId: number): Bank[] {
-  return store.banks.filter((b) => b.userId === userId)
+export async function clearLoginFailures(userId: number): Promise<void> {
+  await db
+    .update(users)
+    .set({ failedLogins: 0, lockedUntil: null })
+    .where(eq(users.id, userId))
 }
 
-export function findBank(userId: number, bankId: number): Bank | undefined {
-  return store.banks.find((b) => b.userId === userId && b.id === bankId)
+// ---------------- BANKS ----------------
+
+function rowToBank(r: typeof banks.$inferSelect): Bank {
+  return {
+    id: r.id,
+    userId: r.userId,
+    name: r.name,
+    type: r.type,
+    balance: r.balance,
+    currency: r.currency,
+    source: r.source as BankSource,
+    createdAt: r.createdAt.toISOString(),
+  }
 }
 
-export function findBankBySource(userId: number, source: BankSource): Bank | undefined {
-  return store.banks.find((b) => b.userId === userId && b.source === source)
+export async function listBanks(userId: number): Promise<Bank[]> {
+  const rows = await db.select().from(banks).where(eq(banks.userId, userId)).orderBy(banks.id)
+  return rows.map(rowToBank)
 }
 
-export function createBank(input: {
+export async function findBank(userId: number, bankId: number): Promise<Bank | undefined> {
+  const [r] = await db
+    .select()
+    .from(banks)
+    .where(and(eq(banks.userId, userId), eq(banks.id, bankId)))
+    .limit(1)
+  return r ? rowToBank(r) : undefined
+}
+
+export async function findBankBySource(
+  userId: number,
+  source: BankSource,
+): Promise<Bank | undefined> {
+  const [r] = await db
+    .select()
+    .from(banks)
+    .where(and(eq(banks.userId, userId), eq(banks.source, source)))
+    .limit(1)
+  return r ? rowToBank(r) : undefined
+}
+
+export async function createBank(input: {
   userId: number
   name: string
   type?: string
   balance?: number
   currency?: string
   source?: BankSource
-}): Bank {
-  const bank: Bank = {
-    id: ++store.seq.bank,
-    userId: input.userId,
-    name: input.name,
-    type: input.type ?? 'bezny',
-    balance: input.balance ?? 0,
-    currency: input.currency ?? 'EUR',
-    source: input.source ?? 'manual',
-    createdAt: new Date().toISOString(),
+}): Promise<Bank> {
+  const [r] = await db
+    .insert(banks)
+    .values({
+      userId: input.userId,
+      name: input.name,
+      type: input.type ?? 'bezny',
+      balance: input.balance ?? 0,
+      currency: input.currency ?? 'EUR',
+      source: input.source ?? 'manual',
+    })
+    .returning()
+  return rowToBank(r)
+}
+
+// ---------------- TRANSACTIONS ----------------
+
+function rowToTransaction(r: typeof transactions.$inferSelect): Transaction {
+  return {
+    id: r.id,
+    userId: r.userId,
+    type: r.type as 'prijem' | 'vydavok',
+    category: r.category,
+    amount: r.amount,
+    bankId: r.bankId,
+    date: r.date,
+    note: r.note,
+    fingerprint: r.fingerprint,
+    aiConfidence: r.aiConfidence ?? null,
+    categorizedBy: r.categorizedBy as CategorizedBy,
+    createdAt: r.createdAt.toISOString(),
   }
-  store.banks.push(bank)
-  return bank
 }
 
-export function updateBankBalance(bankId: number, balance: number): void {
-  const b = store.banks.find((x) => x.id === bankId)
-  if (b) b.balance = balance
-}
-
-// Transactions
-export function listTransactions(
+export async function listTransactions(
   userId: number,
   opts?: { bankId?: number; month?: string; type?: 'prijem' | 'vydavok' },
-): Transaction[] {
-  return store.transactions
-    .filter((t) => {
-      if (t.userId !== userId) return false
-      if (opts?.bankId != null && t.bankId !== opts.bankId) return false
-      if (opts?.month && !t.date.startsWith(opts.month)) return false
-      if (opts?.type && t.type !== opts.type) return false
-      return true
+): Promise<Transaction[]> {
+  const conds = [eq(transactions.userId, userId)]
+  if (opts?.bankId != null) conds.push(eq(transactions.bankId, opts.bankId))
+  if (opts?.type) conds.push(eq(transactions.type, opts.type))
+  if (opts?.month) conds.push(sqlOp`${transactions.date} LIKE ${opts.month + '%'}`)
+
+  const rows = await db
+    .select()
+    .from(transactions)
+    .where(and(...conds))
+    .orderBy(desc(transactions.date), desc(transactions.id))
+  return rows.map(rowToTransaction)
+}
+
+export async function listMonthsWithData(userId: number): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({
+      ym: sqlOp<string>`substring(${transactions.date}, 1, 7)`,
     })
-    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .from(transactions)
+    .where(eq(transactions.userId, userId))
+  return rows.map((r) => r.ym).sort((a, b) => (a < b ? 1 : -1))
 }
 
-/** Returns sorted-desc list of "YYYY-MM" months that have at least one transaction. */
-export function listMonthsWithData(userId: number): string[] {
-  const set = new Set<string>()
-  for (const t of store.transactions) {
-    if (t.userId === userId) set.add(t.date.slice(0, 7))
-  }
-  return [...set].sort((a, b) => (a < b ? 1 : -1))
+export async function recentTransactions(userId: number, limit = 10): Promise<Transaction[]> {
+  const rows = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.userId, userId))
+    .orderBy(desc(transactions.date), desc(transactions.id))
+    .limit(limit)
+  return rows.map(rowToTransaction)
 }
 
-export function recentTransactions(userId: number, limit = 10): Transaction[] {
-  return listTransactions(userId).slice(0, limit)
-}
-
-export function countTransactions(userId: number, bankId?: number): number {
-  return store.transactions.filter(
-    (t) => t.userId === userId && (bankId == null || t.bankId === bankId),
-  ).length
+export async function countTransactions(
+  userId: number,
+  bankId?: number,
+): Promise<number> {
+  const conds = [eq(transactions.userId, userId)]
+  if (bankId != null) conds.push(eq(transactions.bankId, bankId))
+  const [r] = await db
+    .select({ count: sqlOp<number>`count(*)::int` })
+    .from(transactions)
+    .where(and(...conds))
+  return r?.count ?? 0
 }
 
 export interface AddTransactionInput {
   userId: number
   bankId: number
   amount: number // signed: negative=vydavok, positive=prijem
-  date: string // ISO date
+  date: string
   description: string
   category?: string
   fingerprint: string
 }
 
-export function addTransaction(
+export async function addTransaction(
   input: AddTransactionInput,
-): { transaction: Transaction; duplicate: false } | { duplicate: true } {
-  const fpKey = `${input.bankId}::${input.fingerprint}`
-  if (store.fingerprints.has(fpKey)) return { duplicate: true }
-  store.fingerprints.add(fpKey)
+): Promise<{ transaction: Transaction; duplicate: false } | { duplicate: true }> {
+  // Idempotent insert: ON CONFLICT DO NOTHING uses the unique
+  // (bank_id, fingerprint) index defined in schema.ts.
+  const inserted = await db
+    .insert(transactions)
+    .values({
+      userId: input.userId,
+      bankId: input.bankId,
+      type: input.amount < 0 ? 'vydavok' : 'prijem',
+      category: input.category ?? 'Nezaradené',
+      amount: Math.abs(input.amount),
+      date: input.date,
+      note: input.description,
+      fingerprint: input.fingerprint,
+    })
+    .onConflictDoNothing({ target: [transactions.bankId, transactions.fingerprint] })
+    .returning()
 
-  const tx: Transaction = {
-    id: ++store.seq.transaction,
-    userId: input.userId,
-    type: input.amount < 0 ? 'vydavok' : 'prijem',
-    category: input.category ?? 'Nezaradené',
-    amount: Math.abs(input.amount),
-    bankId: input.bankId,
-    date: input.date,
-    note: input.description,
-    fingerprint: input.fingerprint,
-    createdAt: new Date().toISOString(),
+  if (inserted.length === 0) {
+    return { duplicate: true }
   }
-  store.transactions.push(tx)
-  return { transaction: tx, duplicate: false }
+  return { transaction: rowToTransaction(inserted[0]), duplicate: false }
 }
 
-export function deleteAllTransactions(userId: number): { count: number } {
-  const userBankIds = new Set(
-    store.banks.filter((b) => b.userId === userId).map((b) => b.id),
-  )
-  const before = store.transactions.length
-  store.transactions = store.transactions.filter((t) => t.userId !== userId)
-  // Also clear fingerprints for those banks so re-imports work fresh.
-  const fpToRemove: string[] = []
-  for (const fp of store.fingerprints) {
-    const idx = fp.indexOf('::')
-    if (idx === -1) continue
-    const bankId = parseInt(fp.slice(0, idx), 10)
-    if (userBankIds.has(bankId)) fpToRemove.push(fp)
+/** Returns the user's uncategorized (or system-categorized) transactions for AI processing. */
+export async function listUncategorizedTransactions(
+  userId: number,
+  limit = 200,
+): Promise<Transaction[]> {
+  const rows = await db
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.userId, userId),
+        eq(transactions.categorizedBy, 'system'),
+      ),
+    )
+    .orderBy(desc(transactions.date))
+    .limit(limit)
+  return rows.map(rowToTransaction)
+}
+
+export interface CategoryUpdate {
+  id: number
+  category: string
+  aiConfidence?: number | null
+  source: CategorizedBy
+}
+
+/** Bulk-update categories for many transactions (one per query, but batched). */
+export async function applyCategoryUpdates(
+  userId: number,
+  updates: CategoryUpdate[],
+): Promise<number> {
+  let count = 0
+  for (const u of updates) {
+    const r = await db
+      .update(transactions)
+      .set({
+        category: u.category.slice(0, 80),
+        aiConfidence: u.aiConfidence ?? null,
+        categorizedBy: u.source,
+      })
+      .where(and(eq(transactions.userId, userId), eq(transactions.id, u.id)))
+      .returning({ id: transactions.id })
+    count += r.length
   }
-  for (const fp of fpToRemove) store.fingerprints.delete(fp)
-  return { count: before - store.transactions.length }
+  return count
 }
 
-// Incomes
-export function listIncomes(userId: number): Income[] {
-  return store.incomes.filter((i) => i.userId === userId)
+/** Aggregated category totals for a month (used by Raul + dashboard). */
+export async function categorySummary(
+  userId: number,
+  month: string,
+  type: 'vydavok' | 'prijem' = 'vydavok',
+): Promise<Array<{ category: string; total: number; count: number }>> {
+  const rows = await db
+    .select({
+      category: transactions.category,
+      total: sqlOp<number>`sum(${transactions.amount})::float`,
+      count: sqlOp<number>`count(*)::int`,
+    })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.userId, userId),
+        eq(transactions.type, type),
+        sqlOp`${transactions.date} LIKE ${month + '%'}`,
+      ),
+    )
+    .groupBy(transactions.category)
+  return rows
+    .map((r) => ({ category: r.category, total: Number(r.total), count: Number(r.count) }))
+    .sort((a, b) => b.total - a.total)
 }
 
-// Mortgages
-export function listMortgages(userId: number): Mortgage[] {
-  return store.mortgages
-    .filter((m) => m.userId === userId)
-    .sort((a, b) => a.id - b.id)
+// ---------------- Recommendations (Raul) ----------------
+
+export async function getLatestRecommendation(
+  userId: number,
+  period: string,
+): Promise<{ id: number; period: string; content: string; createdAt: string } | null> {
+  const [r] = await db
+    .select()
+    .from(recommendations)
+    .where(and(eq(recommendations.userId, userId), eq(recommendations.period, period)))
+    .orderBy(desc(recommendations.createdAt))
+    .limit(1)
+  if (!r) return null
+  return {
+    id: r.id,
+    period: r.period,
+    content: r.content,
+    createdAt: r.createdAt.toISOString(),
+  }
 }
 
-export function findMortgage(userId: number, id: number): Mortgage | undefined {
-  return store.mortgages.find((m) => m.userId === userId && m.id === id)
+export async function saveRecommendation(
+  userId: number,
+  period: string,
+  content: string,
+): Promise<void> {
+  await db.insert(recommendations).values({ userId, period, content })
+}
+
+export async function deleteAllTransactions(userId: number): Promise<{ count: number }> {
+  const deleted = await db
+    .delete(transactions)
+    .where(eq(transactions.userId, userId))
+    .returning({ id: transactions.id })
+  return { count: deleted.length }
+}
+
+// ---------------- INCOMES ----------------
+
+export async function listIncomes(userId: number): Promise<Income[]> {
+  const rows = await db.select().from(incomes).where(eq(incomes.userId, userId))
+  return rows.map((r) => ({
+    id: r.id,
+    userId: r.userId,
+    source: r.source,
+    employer: r.employer,
+    amount: r.amount,
+    frequency: r.frequency,
+    bankId: r.bankId,
+    date: r.date,
+    note: r.note,
+    createdAt: r.createdAt.toISOString(),
+  }))
+}
+
+// ---------------- MORTGAGES ----------------
+
+function rowToMortgage(r: typeof mortgages.$inferSelect): Mortgage {
+  return {
+    id: r.id,
+    userId: r.userId,
+    propertyName: r.propertyName,
+    bank: r.bank,
+    totalAmount: r.totalAmount,
+    remaining: r.remaining,
+    monthlyPayment: r.monthlyPayment,
+    interestRate: r.interestRate,
+    startDate: r.startDate,
+    endDate: r.endDate,
+    createdAt: r.createdAt.toISOString(),
+  }
+}
+
+export async function listMortgages(userId: number): Promise<Mortgage[]> {
+  const rows = await db
+    .select()
+    .from(mortgages)
+    .where(eq(mortgages.userId, userId))
+    .orderBy(mortgages.id)
+  return rows.map(rowToMortgage)
+}
+
+export async function findMortgage(
+  userId: number,
+  id: number,
+): Promise<Mortgage | undefined> {
+  const [r] = await db
+    .select()
+    .from(mortgages)
+    .where(and(eq(mortgages.userId, userId), eq(mortgages.id, id)))
+    .limit(1)
+  return r ? rowToMortgage(r) : undefined
 }
 
 export interface MortgageInput {
@@ -256,45 +503,289 @@ export interface MortgageInput {
   endDate?: string | null
 }
 
-export function createMortgage(userId: number, input: MortgageInput): Mortgage {
-  const m: Mortgage = {
-    id: ++store.seq.mortgage,
-    userId,
-    propertyName: input.propertyName,
-    bank: input.bank,
-    totalAmount: input.totalAmount,
-    remaining: input.remaining,
-    monthlyPayment: input.monthlyPayment,
-    interestRate: input.interestRate ?? null,
-    startDate: input.startDate ?? null,
-    endDate: input.endDate ?? null,
-    createdAt: new Date().toISOString(),
-  }
-  store.mortgages.push(m)
-  return m
+export async function createMortgage(
+  userId: number,
+  input: MortgageInput,
+): Promise<Mortgage> {
+  const [r] = await db
+    .insert(mortgages)
+    .values({
+      userId,
+      propertyName: input.propertyName,
+      bank: input.bank,
+      totalAmount: input.totalAmount,
+      remaining: input.remaining,
+      monthlyPayment: input.monthlyPayment,
+      interestRate: input.interestRate ?? null,
+      startDate: input.startDate ?? null,
+      endDate: input.endDate ?? null,
+    })
+    .returning()
+  return rowToMortgage(r)
 }
 
-export function updateMortgage(
+export async function updateMortgage(
   userId: number,
   id: number,
   patch: Partial<MortgageInput>,
-): Mortgage | null {
-  const m = findMortgage(userId, id)
-  if (!m) return null
-  if (patch.propertyName !== undefined) m.propertyName = patch.propertyName
-  if (patch.bank !== undefined) m.bank = patch.bank
-  if (patch.totalAmount !== undefined) m.totalAmount = patch.totalAmount
-  if (patch.remaining !== undefined) m.remaining = patch.remaining
-  if (patch.monthlyPayment !== undefined) m.monthlyPayment = patch.monthlyPayment
-  if (patch.interestRate !== undefined) m.interestRate = patch.interestRate
-  if (patch.startDate !== undefined) m.startDate = patch.startDate
-  if (patch.endDate !== undefined) m.endDate = patch.endDate
-  return m
+): Promise<Mortgage | null> {
+  const set: Partial<typeof mortgages.$inferInsert> = {}
+  if (patch.propertyName !== undefined) set.propertyName = patch.propertyName
+  if (patch.bank !== undefined) set.bank = patch.bank
+  if (patch.totalAmount !== undefined) set.totalAmount = patch.totalAmount
+  if (patch.remaining !== undefined) set.remaining = patch.remaining
+  if (patch.monthlyPayment !== undefined) set.monthlyPayment = patch.monthlyPayment
+  if (patch.interestRate !== undefined) set.interestRate = patch.interestRate
+  if (patch.startDate !== undefined) set.startDate = patch.startDate
+  if (patch.endDate !== undefined) set.endDate = patch.endDate
+
+  const [r] = await db
+    .update(mortgages)
+    .set(set)
+    .where(and(eq(mortgages.userId, userId), eq(mortgages.id, id)))
+    .returning()
+  return r ? rowToMortgage(r) : null
 }
 
-export function deleteMortgage(userId: number, id: number): boolean {
-  const idx = store.mortgages.findIndex((m) => m.userId === userId && m.id === id)
-  if (idx === -1) return false
-  store.mortgages.splice(idx, 1)
-  return true
+export async function deleteMortgage(userId: number, id: number): Promise<boolean> {
+  const deleted = await db
+    .delete(mortgages)
+    .where(and(eq(mortgages.userId, userId), eq(mortgages.id, id)))
+    .returning({ id: mortgages.id })
+  return deleted.length > 0
+}
+
+// ---------------- User registration / profile ----------------
+
+export interface CreateUserInput {
+  email: string
+  password: string
+  name?: string | null
+  emailVerified?: boolean
+  role?: UserRole
+}
+
+export async function createUser(input: CreateUserInput): Promise<User> {
+  const { salt, hash } = await hashPassword(input.password)
+  const slug = makeSlug(input.email)
+  const inboundToken = generateToken()
+  const [r] = await db
+    .insert(users)
+    .values({
+      email: input.email.toLowerCase(),
+      passwordHash: hash,
+      salt,
+      name: input.name ?? null,
+      role: input.role ?? 'user',
+      emailVerified: input.emailVerified ?? false,
+      inboundToken,
+      inboundSlug: slug,
+    })
+    .returning()
+  // Auto-create the 3 default banks for new users (matches the seeded user pattern)
+  for (const b of DEFAULT_BANKS) {
+    await db.insert(banks).values({
+      userId: r.id,
+      name: b.name,
+      type: b.type,
+      source: b.source,
+    })
+  }
+  return rowToUser(r)
+}
+
+export async function setUserPassword(userId: number, password: string): Promise<void> {
+  const { salt, hash } = await hashPassword(password)
+  await db
+    .update(users)
+    .set({
+      passwordHash: hash,
+      salt,
+      // bump tokenVersion to invalidate all existing JWTs after password change
+      tokenVersion: sqlOp`${users.tokenVersion} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId))
+}
+
+export async function setUserVerified(userId: number): Promise<void> {
+  await db
+    .update(users)
+    .set({ emailVerified: true, updatedAt: new Date() })
+    .where(eq(users.id, userId))
+}
+
+export interface ProfileUpdate {
+  name?: string | null
+  reportFrequency?: ReportFrequency
+  emailNotifications?: boolean
+}
+
+export async function updateProfile(userId: number, patch: ProfileUpdate): Promise<User | null> {
+  const set: Partial<typeof users.$inferInsert> = { updatedAt: new Date() }
+  if (patch.name !== undefined) set.name = patch.name
+  if (patch.reportFrequency !== undefined) set.reportFrequency = patch.reportFrequency
+  if (patch.emailNotifications !== undefined) set.emailNotifications = patch.emailNotifications
+  const [r] = await db.update(users).set(set).where(eq(users.id, userId)).returning()
+  return r ? rowToUser(r) : null
+}
+
+// ---------------- Admin queries ----------------
+
+export interface AdminStats {
+  totalUsers: number
+  verifiedUsers: number
+  unverifiedUsers: number
+  lockedUsers: number
+  totalBanks: number
+  totalTransactions: number
+  totalMortgages: number
+  recentSignups: Array<{ id: number; email: string; emailVerified: boolean; createdAt: string }>
+}
+
+/** Returns aggregate counts only — never returns financial amounts or descriptions. */
+export async function getAdminStats(): Promise<AdminStats> {
+  const [
+    [{ totalUsers }],
+    [{ verifiedUsers }],
+    [{ lockedUsers }],
+    [{ totalBanks }],
+    [{ totalTx }],
+    [{ totalM }],
+    recentRows,
+  ] = await Promise.all([
+    db.select({ totalUsers: sqlOp<number>`count(*)::int` }).from(users),
+    db
+      .select({ verifiedUsers: sqlOp<number>`count(*)::int` })
+      .from(users)
+      .where(eq(users.emailVerified, true)),
+    db
+      .select({ lockedUsers: sqlOp<number>`count(*)::int` })
+      .from(users)
+      .where(sqlOp`${users.lockedUntil} IS NOT NULL AND ${users.lockedUntil} > ${Date.now()}`),
+    db.select({ totalBanks: sqlOp<number>`count(*)::int` }).from(banks),
+    db.select({ totalTx: sqlOp<number>`count(*)::int` }).from(transactions),
+    db.select({ totalM: sqlOp<number>`count(*)::int` }).from(mortgages),
+    db
+      .select({
+        id: users.id,
+        email: users.email,
+        emailVerified: users.emailVerified,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .orderBy(desc(users.createdAt))
+      .limit(20),
+  ])
+  const tu = Number(totalUsers ?? 0)
+  const vu = Number(verifiedUsers ?? 0)
+  return {
+    totalUsers: tu,
+    verifiedUsers: vu,
+    unverifiedUsers: tu - vu,
+    lockedUsers: Number(lockedUsers ?? 0),
+    totalBanks: Number(totalBanks ?? 0),
+    totalTransactions: Number(totalTx ?? 0),
+    totalMortgages: Number(totalM ?? 0),
+    recentSignups: recentRows.map((r) => ({
+      id: r.id,
+      email: r.email,
+      emailVerified: r.emailVerified,
+      createdAt: r.createdAt.toISOString(),
+    })),
+  }
+}
+
+export async function deleteUser(userId: number): Promise<boolean> {
+  // FK cascade handles banks, transactions, mortgages, incomes, userTokens
+  const deleted = await db.delete(users).where(eq(users.id, userId)).returning({ id: users.id })
+  return deleted.length > 0
+}
+
+// ---------------- One-shot tokens (verify email / password reset) ----------------
+
+const VERIFY_TTL_MS = 24 * 60 * 60 * 1000 // 24h
+const RESET_TTL_MS = 30 * 60 * 1000 // 30 min
+
+async function sha256Hex(input: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
+  const bytes = new Uint8Array(buf)
+  let out = ''
+  for (let i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, '0')
+  return out
+}
+
+function generateUrlToken(): string {
+  // 32 bytes = 256 bits, base64url-safe
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+export type TokenKind = 'verify-email' | 'password-reset'
+
+/** Creates a new one-shot token, invalidates any prior unused tokens of the same kind for this user. */
+export async function issueUserToken(
+  userId: number,
+  kind: TokenKind,
+): Promise<{ token: string; expiresAt: Date }> {
+  // Mark any prior unused tokens of this kind as used (so old links die)
+  await db
+    .update(userTokens)
+    .set({ usedAt: new Date() })
+    .where(
+      and(
+        eq(userTokens.userId, userId),
+        eq(userTokens.kind, kind),
+        isNull(userTokens.usedAt),
+      ),
+    )
+  const token = generateUrlToken()
+  const tokenHash = await sha256Hex(token)
+  const ttl = kind === 'verify-email' ? VERIFY_TTL_MS : RESET_TTL_MS
+  const expiresAt = new Date(Date.now() + ttl)
+  await db.insert(userTokens).values({ userId, kind, tokenHash, expiresAt })
+  return { token, expiresAt }
+}
+
+/** Consumes a token (single use). Returns the userId if valid, null if expired/invalid/used. */
+export async function consumeUserToken(
+  token: string,
+  kind: TokenKind,
+): Promise<number | null> {
+  const tokenHash = await sha256Hex(token)
+  const [row] = await db
+    .select()
+    .from(userTokens)
+    .where(and(eq(userTokens.tokenHash, tokenHash), eq(userTokens.kind, kind)))
+    .limit(1)
+  if (!row) return null
+  if (row.usedAt) return null
+  if (row.expiresAt.getTime() < Date.now()) return null
+  await db
+    .update(userTokens)
+    .set({ usedAt: new Date() })
+    .where(eq(userTokens.id, row.id))
+  return row.userId
+}
+
+// ---------------- Token / slug helpers ----------------
+
+const TOKEN_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'
+const TOKEN_LENGTH = 12
+function generateToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(TOKEN_LENGTH))
+  let out = ''
+  for (let i = 0; i < TOKEN_LENGTH; i++) out += TOKEN_ALPHABET[bytes[i] % TOKEN_ALPHABET.length]
+  return out
+}
+
+function makeSlug(raw: string): string {
+  const local = raw.split('@')[0].toLowerCase()
+  const cleaned = local
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 16)
+  return cleaned || 'user'
 }

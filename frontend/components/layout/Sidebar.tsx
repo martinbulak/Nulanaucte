@@ -16,6 +16,7 @@ const NAV: NavItem[] = [
   { to: '/prijmy', label: 'Príjmy', icon: '⚜', enabled: true },
   { to: '/vydavky', label: 'Výdavky', icon: '☥', enabled: true },
   { to: '/hypoteky', label: 'Hypotéky', icon: '⚱', enabled: true },
+  { to: '/nastavenia', label: 'Nastavenia', icon: '⚙', enabled: true },
 ]
 
 interface Props {

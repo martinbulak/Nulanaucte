@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { Card } from '../components/ui/Card'
 import { MonthPicker, formatMonth } from '../components/ui/MonthPicker'
+import { CategorizeButton } from '../components/ui/AIButtons'
 import { apiFetch } from '../utils/api'
 
 type TxType = 'prijem' | 'vydavok'
@@ -14,7 +15,30 @@ interface Transaction {
   amount: number
   bankId: number | null
   note: string | null
+  categorizedBy?: 'system' | 'ai' | 'user'
+  aiConfidence?: number | null
 }
+
+const CATEGORIES = [
+  'Potraviny',
+  'Reštaurácie a kaviarne',
+  'Tankovanie',
+  'Auto a doprava',
+  'Bývanie',
+  'Energie',
+  'Telekomunikácie',
+  'Zdravie',
+  'Oblečenie',
+  'Zábava',
+  'Predplatné',
+  'Príjem',
+  'Výber z bankomatu',
+  'Prevody medzi účtami',
+  'Splátky a úvery',
+  'Poistenie',
+  'Iné',
+  'Nezaradené',
+]
 
 interface Bank {
   id: number
@@ -219,16 +243,21 @@ export function TransactionsPage({ type }: Props) {
       {/* List */}
       <div className="reveal reveal-4">
         <Card>
-          <div className="flex items-baseline justify-between mb-4">
+          <div className="flex items-baseline justify-between mb-4 flex-wrap gap-3">
             <h2 className="font-heading text-xl text-text-primary tracking-wide">
               Všetky pohyby
             </h2>
-            <Link
-              to="/banky"
-              className="font-heading text-[0.6rem] uppercase tracking-widest text-gold border border-gold/30 bg-gold/10 px-2.5 py-1 rounded-[2px] hover:border-gold-bright hover:text-gold-bright transition-colors"
-            >
-              ⌬ Importovať ďalšie
-            </Link>
+            <div className="flex items-center gap-3 flex-wrap">
+              {type === 'vydavok' && (
+                <CategorizeButton onDone={() => load(month)} />
+              )}
+              <Link
+                to="/banky"
+                className="font-heading text-[0.6rem] uppercase tracking-widest text-gold border border-gold/30 bg-gold/10 px-2.5 py-1 rounded-[2px] hover:border-gold-bright hover:text-gold-bright transition-colors"
+              >
+                ⌬ Importovať
+              </Link>
+            </div>
           </div>
 
           {loading ? (
@@ -255,6 +284,9 @@ export function TransactionsPage({ type }: Props) {
                       Popis
                     </th>
                     <th className="font-heading text-[0.6rem] uppercase tracking-widest text-text-muted px-4 py-2.5 text-left font-normal">
+                      Kategória
+                    </th>
+                    <th className="font-heading text-[0.6rem] uppercase tracking-widest text-text-muted px-4 py-2.5 text-left font-normal">
                       Banka
                     </th>
                     <th className="font-heading text-[0.6rem] uppercase tracking-widest text-text-muted px-4 py-2.5 text-right font-normal">
@@ -272,7 +304,13 @@ export function TransactionsPage({ type }: Props) {
                         {t.date}
                       </td>
                       <td className="px-4 py-2.5 text-text-primary text-sm">
-                        <span className="block truncate max-w-md">{t.note || '—'}</span>
+                        <span className="block truncate max-w-xs">{t.note || '—'}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-text-secondary text-sm">
+                        <CategorySelect
+                          tx={t}
+                          onChange={() => load(month)}
+                        />
                       </td>
                       <td className="px-4 py-2.5 text-text-muted text-xs italic">
                         {bankName(t.bankId)}
@@ -292,5 +330,46 @@ export function TransactionsPage({ type }: Props) {
         </Card>
       </div>
     </div>
+  )
+}
+
+function CategorySelect({ tx, onChange }: { tx: Transaction; onChange: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const tone =
+    tx.categorizedBy === 'user'
+      ? 'text-gold-bright'
+      : tx.categorizedBy === 'ai'
+      ? 'text-cobalt-bright'
+      : 'text-text-secondary'
+  async function update(newCat: string) {
+    if (newCat === tx.category) return
+    setBusy(true)
+    const res = await apiFetch(`/api/ai/transactions/${tx.id}/category`, {
+      method: 'PATCH',
+      body: JSON.stringify({ category: newCat }),
+    })
+    setBusy(false)
+    if (res.ok) onChange()
+  }
+  return (
+    <select
+      value={tx.category}
+      disabled={busy}
+      onChange={(e) => update(e.target.value)}
+      className={`bg-transparent border border-border-dim rounded-[2px] px-2 py-1 font-heading text-[0.65rem] uppercase tracking-widest ${tone} hover:border-gold focus:border-gold-bright outline-none cursor-pointer max-w-[180px]`}
+      title={
+        tx.categorizedBy === 'ai'
+          ? `AI · confidence ${Math.round((tx.aiConfidence ?? 0) * 100)}%`
+          : tx.categorizedBy === 'user'
+          ? 'Ručne'
+          : 'Nezaradené'
+      }
+    >
+      {CATEGORIES.map((c) => (
+        <option key={c} value={c} className="bg-obsidian text-text-primary">
+          {c}
+        </option>
+      ))}
+    </select>
   )
 }

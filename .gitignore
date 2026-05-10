@@ -4,8 +4,17 @@ dist/
 .dev.vars
 .env
 .env.*
+!.env.example
 *.sqlite
 *.db
 *.log
 .DS_Store
 .vite/
+.vercel/
+# Drizzle migrations are gitignored for now (we use `drizzle-kit push --force`).
+# When ready for prod, consider committing them for traceability.
+drizzle/
+# TypeScript composite build outputs
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts

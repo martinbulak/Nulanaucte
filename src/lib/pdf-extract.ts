@@ -15,7 +15,6 @@ let pdfjsModulePromise: Promise<typeof import('pdfjs-dist/legacy/build/pdf.mjs')
 
 async function loadPdfjs() {
   if (!pdfjsModulePromise) {
-    // @ts-expect-error — legacy build has no published types but ships .mjs entry
     pdfjsModulePromise = import('pdfjs-dist/legacy/build/pdf.mjs')
   }
   return pdfjsModulePromise

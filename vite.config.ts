@@ -1,3 +1,4 @@
+import 'dotenv/config' // load .env into process.env for server-side modules
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -15,12 +16,18 @@ export default defineConfig({
         /.*\.(ts|tsx|jsx|js|css|svg|png|jpg|jpeg|gif|webp|ico|woff2?)$/,
         /^\/(public|src|frontend|node_modules|@vite|@react-refresh)\/.+/,
         /^\/$/,
-        /^\/login$/,
+        /^\/login.*$/,
+        /^\/register.*$/,
+        /^\/verify.*$/,
+        /^\/forgot.*$/,
+        /^\/reset.*$/,
         /^\/dashboard.*$/,
         /^\/banky.*$/,
         /^\/prijmy.*$/,
         /^\/vydavky.*$/,
         /^\/hypoteky.*$/,
+        /^\/nastavenia.*$/,
+        /^\/admin.*$/,
       ],
       injectClientScript: false,
     }),

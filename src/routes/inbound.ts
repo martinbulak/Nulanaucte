@@ -1,12 +1,14 @@
 import { Hono } from 'hono'
 import {
   addTransaction,
-  createBank,
   findBankBySource,
   findUserByInboundToken,
 } from '../db'
 import { detectPdfFormat, parsePdf } from '../lib/pdf-parsers'
 import { extractPdfText } from '../lib/pdf-extract'
+import { rateLimit } from '../middleware/rateLimit'
+import { bodyLimit } from '../middleware/bodyLimit'
+import { env } from '../env'
 import type { BankSource } from '../types'
 
 export const inboundRoutes = new Hono()
@@ -14,9 +16,7 @@ export const inboundRoutes = new Hono()
 interface ResendInboundAttachment {
   filename?: string
   contentType?: string
-  content?: string // base64
-  // Some providers use different shapes — be tolerant
-  content_id?: string
+  content?: string
   size?: number
 }
 
@@ -29,8 +29,14 @@ interface ResendInboundPayload {
   attachments?: ResendInboundAttachment[]
 }
 
-const ENV =
-  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {}
+// 10 MB hard cap on inbound payload (PDF + JSON envelope)
+const MAX_PAYLOAD_BYTES = 10 * 1024 * 1024
+// Per-attachment cap
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+// Webhook timestamp tolerance (Svix recommendation)
+const WEBHOOK_MAX_AGE_SEC = 5 * 60
+// Per-IP rate limit on inbound: Resend can retry, allow burst but cap aggressive callers
+const inboundLimit = rateLimit({ name: 'inbound-ip', max: 60, windowMs: 60 * 1000 })
 
 const SOURCE_LABEL: Record<BankSource, string> = {
   slsp: 'Slovenská sporiteľňa',
@@ -39,26 +45,35 @@ const SOURCE_LABEL: Record<BankSource, string> = {
   manual: 'Manuálne',
 }
 
-/**
- * Verifies a Svix-signed webhook (Resend uses Svix internals).
- * Headers expected: svix-id, svix-timestamp, svix-signature.
- * Secret format: "whsec_BASE64"
- *
- * This is best-effort — if INBOUND_WEBHOOK_SECRET is unset (dev), we skip
- * verification entirely and warn in logs.
- */
-async function verifyWebhook(c: {
-  req: { header: (n: string) => string | undefined }
-}, rawBody: string): Promise<boolean> {
-  const secret = ENV.INBOUND_WEBHOOK_SECRET
+// Shorten an email to a non-PII identifier for logs (audit H5)
+function redactEmail(addr: string | undefined): string {
+  if (!addr) return '<none>'
+  const [local, domain] = addr.split('@', 2)
+  if (!domain) return '<malformed>'
+  const head = local.slice(0, 2)
+  return `${head}***@${domain}`
+}
+
+async function verifyWebhook(
+  c: { req: { header: (n: string) => string | undefined } },
+  rawBody: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const secret = env.INBOUND_WEBHOOK_SECRET
   if (!secret) {
-    console.warn('[inbound] INBOUND_WEBHOOK_SECRET not set — accepting unsigned webhooks (DEV ONLY)')
-    return true
+    if (env.isProd) return { ok: false, reason: 'no-secret-in-prod' }
+    return { ok: true } // dev only — env.ts already warned at boot
   }
+
   const id = c.req.header('svix-id') || c.req.header('webhook-id')
   const ts = c.req.header('svix-timestamp') || c.req.header('webhook-timestamp')
   const sig = c.req.header('svix-signature') || c.req.header('webhook-signature')
-  if (!id || !ts || !sig) return false
+  if (!id || !ts || !sig) return { ok: false, reason: 'missing-headers' }
+
+  // Replay protection — reject stale signatures (audit H4)
+  const tsNum = Number(ts)
+  if (!Number.isFinite(tsNum)) return { ok: false, reason: 'bad-timestamp' }
+  const ageSec = Math.abs(Date.now() / 1000 - tsNum)
+  if (ageSec > WEBHOOK_MAX_AGE_SEC) return { ok: false, reason: 'stale-signature' }
 
   const secretBytes = secret.startsWith('whsec_')
     ? base64ToBytes(secret.slice('whsec_'.length))
@@ -67,7 +82,7 @@ async function verifyWebhook(c: {
   const toSign = `${id}.${ts}.${rawBody}`
   const key = await crypto.subtle.importKey(
     'raw',
-    secretBytes,
+    secretBytes as BufferSource,
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
@@ -75,13 +90,11 @@ async function verifyWebhook(c: {
   const sigBytes = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(toSign))
   const expected = bytesToBase64(new Uint8Array(sigBytes))
 
-  // Header format: "v1,base64sig v1,otherbase64sig"
-  const candidates = sig.split(' ').map((p) => p.trim())
-  for (const cand of candidates) {
-    const [, b64] = cand.split(',', 2)
-    if (b64 && timingSafeEqual(b64, expected)) return true
+  for (const cand of sig.split(' ')) {
+    const [, b64] = cand.trim().split(',', 2)
+    if (b64 && timingSafeEqual(b64, expected)) return { ok: true }
   }
-  return false
+  return { ok: false, reason: 'signature-mismatch' }
 }
 
 function base64ToBytes(b64: string): Uint8Array {
@@ -104,7 +117,11 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
-function extractRecipientToken(payload: ResendInboundPayload): string | null {
+/**
+ * Extract `(slug, token)` from any recipient address. Both must be present and
+ * match the user's stored values (audit H3 — token alone is not enough).
+ */
+function extractRecipient(payload: ResendInboundPayload): { slug: string; token: string } | null {
   const recipients: string[] = []
   if (typeof payload.to === 'string') recipients.push(payload.to)
   else if (Array.isArray(payload.to)) {
@@ -115,11 +132,13 @@ function extractRecipientToken(payload: ResendInboundPayload): string | null {
   }
   for (const addr of recipients) {
     const local = addr.split('@')[0]
-    // Token is everything after the last "-"
     const idx = local.lastIndexOf('-')
     if (idx === -1) continue
-    const token = local.slice(idx + 1).trim()
-    if (token) return token
+    const slug = local.slice(0, idx).toLowerCase()
+    const token = local.slice(idx + 1).toLowerCase()
+    if (slug && token && /^[a-z0-9-]+$/.test(slug) && /^[a-z0-9]+$/.test(token)) {
+      return { slug, token }
+    }
   }
   return null
 }
@@ -139,17 +158,17 @@ function isPdfAttachment(att: ResendInboundAttachment): boolean {
   return false
 }
 
-inboundRoutes.post('/email', async (c) => {
+inboundRoutes.post('/email', bodyLimit(MAX_PAYLOAD_BYTES), inboundLimit, async (c) => {
   const rawBody = await c.req.text()
 
-  // 1. Verify signature (skipped in dev when no secret set)
-  const ok = await verifyWebhook(c, rawBody)
-  if (!ok) {
-    console.warn('[inbound] webhook signature verification failed')
+  // 1. Signature
+  const verify = await verifyWebhook(c, rawBody)
+  if (!verify.ok) {
+    console.warn(`[inbound] reject: ${verify.reason}`)
     return c.json({ ok: false, error: 'invalid signature' }, 401)
   }
 
-  // 2. Parse JSON body
+  // 2. Parse JSON
   let payload: ResendInboundPayload
   try {
     payload = JSON.parse(rawBody)
@@ -157,20 +176,18 @@ inboundRoutes.post('/email', async (c) => {
     return c.json({ ok: false, error: 'invalid json' }, 400)
   }
 
-  // 3. Find recipient user via token in "to" address
-  const token = extractRecipientToken(payload)
-  if (!token) {
-    console.warn('[inbound] could not extract token from recipient', payload.to)
-    // Always return 200 so Resend stops retrying junk
-    return c.json({ ok: true, data: { skipped: 'no-token' } })
+  // 3. Recipient → (slug, token) → user (slug must match!)
+  const rcpt = extractRecipient(payload)
+  if (!rcpt) {
+    return c.json({ ok: true, data: { skipped: 'no-recipient' } })
   }
-  const user = findUserByInboundToken(token)
-  if (!user) {
-    console.warn(`[inbound] unknown token "${token}"`)
-    return c.json({ ok: true, data: { skipped: 'unknown-token' } })
+  const user = await findUserByInboundToken(rcpt.token)
+  if (!user || user.inboundSlug.toLowerCase() !== rcpt.slug) {
+    // Always 200 so Resend doesn't retry; intentionally vague to deter enumeration
+    return c.json({ ok: true, data: { skipped: 'unknown-recipient' } })
   }
 
-  // 4. Iterate attachments, run each PDF through the parser
+  // 4. Iterate attachments
   const attachments = Array.isArray(payload.attachments) ? payload.attachments : []
   let totalImported = 0
   let totalDuplicates = 0
@@ -190,17 +207,25 @@ inboundRoutes.post('/email', async (c) => {
       if (att.filename) skipped.push(`${att.filename} (nie PDF)`)
       continue
     }
+    if (att.size && att.size > MAX_ATTACHMENT_BYTES) {
+      skipped.push(`${att.filename ?? 'unnamed'} (príliš veľký)`)
+      continue
+    }
     const bytes = decodeAttachment(att)
     if (!bytes) {
-      skipped.push(`${att.filename ?? 'unnamed'} (nepodaril sa decode)`)
+      skipped.push(`${att.filename ?? 'unnamed'} (decode error)`)
+      continue
+    }
+    if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+      skipped.push(`${att.filename ?? 'unnamed'} (príliš veľký po decode)`)
       continue
     }
 
     let text: string
     try {
       text = await extractPdfText(bytes)
-    } catch (err) {
-      console.error('[inbound] PDF extract failed:', err)
+    } catch {
+      // Don't log raw error — may include PDF excerpts (audit H5)
       skipped.push(`${att.filename ?? 'unnamed'} (PDF extract error)`)
       continue
     }
@@ -212,26 +237,30 @@ inboundRoutes.post('/email', async (c) => {
     const detectedFormat = detectPdfFormat(text)
     const parsed = parsePdf(text, detectedFormat ?? undefined)
     if (parsed.source === 'manual' || parsed.rows.length === 0) {
+      skipped.push(`${att.filename ?? 'unnamed'} (neznámy formát alebo 0 transakcií)`)
+      continue
+    }
+
+    // Audit M2: do NOT auto-create banks for inbound. User must have set up
+    // the matching bank explicitly (registration flow seeds the 3 default ones).
+    const bank = await findBankBySource(user.id, parsed.source)
+    if (!bank) {
       skipped.push(
-        `${att.filename ?? 'unnamed'} (neznámy formát alebo 0 transakcií)`,
+        `${att.filename ?? 'unnamed'} (banka "${parsed.source}" nie je v účte — pridaj ju manuálne)`,
       )
       continue
     }
 
-    // Find or auto-create the matching bank for this user
-    let bank = findBankBySource(user.id, parsed.source)
-    if (!bank) {
-      bank = createBank({
-        userId: user.id,
-        name: SOURCE_LABEL[parsed.source],
-        source: parsed.source,
-      })
-    }
-
     let imported = 0
     let duplicates = 0
-    for (const row of parsed.rows) {
-      const r = addTransaction({
+    // Cap rows to prevent runaway imports
+    const MAX_ROWS = 5000
+    const rows = parsed.rows.slice(0, MAX_ROWS)
+    for (const row of rows) {
+      // Sanity bounds (audit M7)
+      if (!Number.isFinite(row.amount) || Math.abs(row.amount) > 1_000_000) continue
+      if (typeof row.description !== 'string' || row.description.length > 500) continue
+      const r = await addTransaction({
         userId: user.id,
         bankId: bank.id,
         amount: row.amount,
@@ -245,21 +274,22 @@ inboundRoutes.post('/email', async (c) => {
 
     totalImported += imported
     totalDuplicates += duplicates
-    totalRows += parsed.rows.length
+    totalRows += rows.length
     perFile.push({
-      filename: att.filename ?? 'unnamed',
+      filename: att.filename?.slice(0, 120) ?? 'unnamed',
       format: parsed.source,
       bankName: bank.name,
       imported,
       duplicates,
-      errors: parsed.errors,
+      errors: parsed.errors.slice(0, 5),
     })
   }
 
+  // Redacted log — no subject, no full from, just hashed identifier
   console.log(
-    `[inbound] user=${user.id} from="${
-      typeof payload.from === 'string' ? payload.from : payload.from?.email
-    }" subject="${payload.subject ?? ''}" → ${totalImported} new, ${totalDuplicates} dup, ${skipped.length} skipped`,
+    `[inbound] user=${user.id} from=${redactEmail(
+      typeof payload.from === 'string' ? payload.from : payload.from?.email,
+    )} → ${totalImported} new, ${totalDuplicates} dup, ${skipped.length} skipped`,
   )
 
   return c.json({

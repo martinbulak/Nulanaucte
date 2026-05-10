@@ -16,7 +16,7 @@ export interface PdfExtraction {
  */
 export async function extractPdfText(file: File): Promise<PdfExtraction> {
   const data = await file.arrayBuffer()
-  const pdf = await pdfjs.getDocument({ data, isEvalSupported: false }).promise
+  const pdf = await pdfjs.getDocument(data).promise
   const pageTexts: string[] = []
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
