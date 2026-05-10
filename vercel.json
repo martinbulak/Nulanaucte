@@ -1,13 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "vite build",
-  "outputDirectory": "dist",
-  "functions": {
-    "api/[...path].ts": {
-      "runtime": "@vercel/node@5.0.0",
-      "maxDuration": 30
-    }
-  },
   "rewrites": [
     {
       "source": "/((?!api/|assets/|favicon|.*\\.(?:js|css|svg|png|jpg|jpeg|gif|webp|ico|woff2?|map)).*)",
