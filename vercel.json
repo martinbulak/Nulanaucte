@@ -4,7 +4,6 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/[[...path]]" },
     {
       "source": "/((?!api/|assets/|favicon|.*\\.(?:js|css|svg|png|jpg|jpeg|gif|webp|ico|woff2?|map)).*)",
       "destination": "/index.html"
