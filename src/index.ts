@@ -37,7 +37,19 @@ app.use(
 )
 
 app.use('*', async (c, next) => {
-  await ensureSeeded()
+  try {
+    await ensureSeeded()
+  } catch (e) {
+    console.error('[server] ensureSeeded failed:', e instanceof Error ? e.message : e)
+    return c.json(
+      {
+        ok: false,
+        error: 'Database not reachable. Check DATABASE_URL env var.',
+        ref: 'db-init',
+      },
+      503,
+    )
+  }
   await next()
 })
 
