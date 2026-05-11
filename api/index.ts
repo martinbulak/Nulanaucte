@@ -13,7 +13,9 @@ import app from '../src/index.js'
 
 export const config = {
   runtime: 'nodejs',
-  maxDuration: 30,
+  // 60s = Vercel Hobby max. Bulk AI categorization of large imports takes ~5-15s
+  // with chunked parallelism; 60s gives headroom for slower months.
+  maxDuration: 60,
 }
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {

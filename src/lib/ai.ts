@@ -106,9 +106,57 @@ Slovenské heuristiky:
 Zoznam kategórií:
 ${CATEGORIES.join('\n')}`
 
+// Tunable — gpt-4o-mini handles 25 items per call comfortably in ~2-3s.
+// 6 batches × 25 = 150 transactions in ~4-6s wall-clock when parallelized.
+const BATCH_SIZE = 25
+// Cap on parallel OpenAI calls to avoid hitting rate limits.
+const MAX_PARALLEL = 6
+
+/** Single OpenAI call for one batch. Returns nulls for items it couldn't categorize. */
+async function aiCategorizeOne(
+  client: OpenAI,
+  batch: TxToCategorize[],
+): Promise<{ items: CategorizedTx[]; tokens: number }> {
+  const minimal = batch.map((t) => ({
+    id: t.id,
+    type: t.type,
+    amount: Math.abs(t.amount),
+    note: t.note.slice(0, 120),
+  }))
+  const res = await client.chat.completions.create({
+    model: MODEL,
+    temperature: 0.1,
+    max_tokens: Math.min(2000, 60 * batch.length),
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: `Priraď kategóriu ku každej z týchto transakcií:\n${JSON.stringify(minimal)}`,
+      },
+    ],
+  })
+  const raw = res.choices[0]?.message?.content ?? '{"items":[]}'
+  const parsed = JSON.parse(raw) as { items?: Array<{ id?: number; category?: string; confidence?: number }> }
+  const items: CategorizedTx[] = []
+  if (Array.isArray(parsed.items)) {
+    const validSet = new Set<string>(CATEGORIES)
+    for (const it of parsed.items) {
+      if (typeof it.id !== 'number') continue
+      if (typeof it.category !== 'string' || !validSet.has(it.category)) continue
+      const conf = typeof it.confidence === 'number' ? Math.max(0, Math.min(1, it.confidence)) : 0.5
+      items.push({ id: it.id, category: it.category as Category, confidence: conf })
+    }
+  }
+  return { items, tokens: res.usage?.total_tokens ?? 0 }
+}
+
 /**
  * Categorizes a batch of transactions. Uses GPT-4o-mini if OPENAI_API_KEY is set,
  * otherwise falls back to rule-based matching (works offline).
+ *
+ * Splits large input into ~25-item chunks and runs up to MAX_PARALLEL in parallel.
+ * Falls back to rule-based for any chunk that fails.
  */
 export async function categorizeBatch(
   txs: TxToCategorize[],
@@ -120,45 +168,55 @@ export async function categorizeBatch(
     return { items: txs.map(ruleBased), usedAI: false }
   }
 
-  // Strip data — send only id + minimal fields. Don't send IBANs or VS numbers.
-  const minimal = txs.map((t) => ({
-    id: t.id,
-    type: t.type,
-    amount: Math.abs(t.amount),
-    note: t.note.slice(0, 120),
-  }))
-
-  try {
-    const res = await client.chat.completions.create({
-      model: MODEL,
-      temperature: 0.1,
-      max_tokens: Math.min(2000, 60 * txs.length),
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: `Priraď kategóriu ku každej z týchto transakcií:\n${JSON.stringify(minimal)}`,
-        },
-      ],
-    })
-    const raw = res.choices[0]?.message?.content ?? '{"items":[]}'
-    const parsed = JSON.parse(raw) as { items?: Array<{ id?: number; category?: string; confidence?: number }> }
-    const items: CategorizedTx[] = []
-    if (Array.isArray(parsed.items)) {
-      const validSet = new Set<string>(CATEGORIES)
-      for (const it of parsed.items) {
-        if (typeof it.id !== 'number') continue
-        if (typeof it.category !== 'string' || !validSet.has(it.category)) continue
-        const conf = typeof it.confidence === 'number' ? Math.max(0, Math.min(1, it.confidence)) : 0.5
-        items.push({ id: it.id, category: it.category as Category, confidence: conf })
-      }
-    }
-    return { items, usedAI: true, tokens: res.usage?.total_tokens }
-  } catch (e) {
-    console.error('[ai] categorize failed, falling back to rules:', e instanceof Error ? e.message : e)
-    return { items: txs.map(ruleBased), usedAI: false }
+  // Split into chunks
+  const chunks: TxToCategorize[][] = []
+  for (let i = 0; i < txs.length; i += BATCH_SIZE) {
+    chunks.push(txs.slice(i, i + BATCH_SIZE))
   }
+
+  // Run with concurrency cap
+  const results: Array<{ items: CategorizedTx[]; tokens: number; failed?: TxToCategorize[] }> = []
+  for (let i = 0; i < chunks.length; i += MAX_PARALLEL) {
+    const slice = chunks.slice(i, i + MAX_PARALLEL)
+    const settled = await Promise.allSettled(slice.map((c) => aiCategorizeOne(client, c)))
+    settled.forEach((s, idx) => {
+      if (s.status === 'fulfilled') {
+        results.push(s.value)
+      } else {
+        console.error(
+          '[ai] chunk failed, will use rule-based for',
+          slice[idx].length,
+          'items:',
+          s.reason instanceof Error ? s.reason.message : s.reason,
+        )
+        results.push({ items: [], tokens: 0, failed: slice[idx] })
+      }
+    })
+  }
+
+  // Merge results + apply rule-based fallback for any tx not covered
+  const aiItems: CategorizedTx[] = []
+  let totalTokens = 0
+  const coveredIds = new Set<number>()
+  for (const r of results) {
+    totalTokens += r.tokens
+    for (const it of r.items) {
+      aiItems.push(it)
+      coveredIds.add(it.id)
+    }
+  }
+
+  // Anything that AI missed → rule-based
+  const fallbackItems: CategorizedTx[] = []
+  for (const t of txs) {
+    if (!coveredIds.has(t.id)) {
+      fallbackItems.push(ruleBased(t))
+    }
+  }
+
+  const allItems = [...aiItems, ...fallbackItems]
+  // usedAI true iff at least one item came from AI
+  return { items: allItems, usedAI: aiItems.length > 0, tokens: totalTokens }
 }
 
 // ---------------- RAUL RECOMMENDATIONS ----------------
