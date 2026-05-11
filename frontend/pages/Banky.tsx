@@ -276,6 +276,26 @@ function ImportModal({ bank, onClose, onDone }: ImportModalProps) {
   const [result, setResult] = useState<ImportResult | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [override, setOverride] = useState<BankSource>(bank.source)
+  const [isDragging, setIsDragging] = useState(false)
+  // dragenter/dragleave fire for every child element — use a counter so we
+  // only flip isDragging off when the cursor truly leaves the dropzone.
+  const dragDepth = useRef(0)
+
+  // While the modal is open, swallow drag/drop events that land OUTSIDE the
+  // dropzone — otherwise Chrome would open the dropped file as a new tab and
+  // the user would lose their work. The actual handlers on the label still
+  // run normally (event bubbles up but its default is already cancelled).
+  useEffect(() => {
+    const stop = (e: DragEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('dragover', stop)
+    window.addEventListener('drop', stop)
+    return () => {
+      window.removeEventListener('dragover', stop)
+      window.removeEventListener('drop', stop)
+    }
+  }, [])
 
   async function readFile(file: File) {
     setErr(null)
@@ -328,6 +348,55 @@ function ImportModal({ bank, onClose, onDone }: ImportModalProps) {
   async function onFile(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
     if (f) await readFile(f)
+  }
+
+  // ---- Drag & drop handlers ----------------------------------------------
+  // Keep the dropzone reactive while the user drags a file over it. We must
+  // call e.preventDefault() inside onDragOver, otherwise the browser will
+  // never fire onDrop (the default action — "navigate to the dropped file" —
+  // takes precedence).
+
+  function onDragEnter(e: React.DragEvent<HTMLLabelElement>) {
+    if (extracting) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragDepth.current += 1
+    if (dragDepth.current === 1) setIsDragging(true)
+  }
+
+  function onDragOver(e: React.DragEvent<HTMLLabelElement>) {
+    if (extracting) return
+    e.preventDefault()
+    e.stopPropagation()
+    // Tell the OS this is a "copy" target (cursor shows + sign).
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  }
+
+  function onDragLeave(e: React.DragEvent<HTMLLabelElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (dragDepth.current === 0) setIsDragging(false)
+  }
+
+  async function onDrop(e: React.DragEvent<HTMLLabelElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    dragDepth.current = 0
+    setIsDragging(false)
+    if (extracting) return
+    const f = e.dataTransfer?.files?.[0]
+    if (!f) return
+    // Also sync the hidden <input> so re-picking the same file later works
+    // (some browsers won't re-fire onChange for the same path otherwise).
+    try {
+      if (fileRef.current && e.dataTransfer.files) {
+        fileRef.current.files = e.dataTransfer.files
+      }
+    } catch {
+      /* DataTransfer is read-only in some sandboxes — safe to ignore */
+    }
+    await readFile(f)
   }
 
   async function changeOverride(s: BankSource) {
@@ -387,27 +456,46 @@ function ImportModal({ bank, onClose, onDone }: ImportModalProps) {
 
           {!result && (
             <>
-              {/* File picker */}
+              {/* File picker — click OR drag & drop */}
               <div className="mb-6">
                 <label
                   htmlFor="csv-file"
-                  className="block cursor-pointer border-2 border-dashed border-border rounded-[4px] px-6 py-10 text-center hover:border-gold hover:bg-gold/5 transition-all duration-300"
+                  onDragEnter={onDragEnter}
+                  onDragOver={onDragOver}
+                  onDragLeave={onDragLeave}
+                  onDrop={onDrop}
+                  className={[
+                    'block cursor-pointer border-2 border-dashed rounded-[4px] px-6 py-10 text-center transition-all duration-200',
+                    isDragging
+                      ? 'border-gold-bright bg-gold/15 scale-[1.01] [box-shadow:0_0_24px_rgba(201,151,42,0.35)]'
+                      : 'border-border hover:border-gold hover:bg-gold/5',
+                  ].join(' ')}
                 >
                   <span className="text-3xl text-gold block mb-2">
-                    {extracting ? <span className="flicker">✦</span> : '⌬'}
+                    {extracting ? (
+                      <span className="flicker">✦</span>
+                    ) : isDragging ? (
+                      '⇩'
+                    ) : (
+                      '⌬'
+                    )}
                   </span>
                   <span className="font-heading text-sm uppercase tracking-widest text-gold">
                     {extracting
                       ? 'Čítam pergamen…'
+                      : isDragging
+                      ? 'Pusti súbor sem'
                       : fileName
                       ? fileName
-                      : 'Vyber CSV alebo PDF súbor'}
+                      : 'Pretiahni súbor sem alebo klikni a vyber'}
                   </span>
                   <p className="font-ui text-xs text-text-muted italic mt-2">
                     {extracting
                       ? 'PDF sa lúšti v prehliadači'
+                      : isDragging
+                      ? 'CSV alebo PDF'
                       : fileName
-                      ? `${payload?.kind === 'pdf' ? 'PDF' : 'CSV'} · kliknutím vyber iný súbor`
+                      ? `${payload?.kind === 'pdf' ? 'PDF' : 'CSV'} · klikni alebo pretiahni iný súbor`
                       : 'CSV export alebo PDF výpis (SLSP) — Tatra / Revolut tiež OK pre CSV'}
                   </p>
                   <input

@@ -262,7 +262,24 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Recent transactions */}
+      {/* Raul — Veštba z Komnaty galeónov (top of fold once user has data) */}
+      {summary?.month && summary.counts.transactionsMonth > 0 && (
+        <div className="mb-12 reveal reveal-6">
+          <Card>
+            <RaulPanel month={summary.month} />
+          </Card>
+        </div>
+      )}
+
+      {/* Category breakdown (current month) + Category trend (last 6 months) */}
+      <CategoryDashboardSection
+        monthLabel={monthLabel}
+        currentMonth={summary?.month}
+        catRows={catRows}
+        catTrend={catTrend}
+      />
+
+      {/* Recent transactions — under the analysis sections */}
       <div className="mb-12 reveal reveal-6">
         <Card>
           <div className="flex items-baseline justify-between mb-5">
@@ -348,23 +365,6 @@ export function Dashboard() {
           )}
         </Card>
       </div>
-
-      {/* Raul */}
-      {summary?.month && summary.counts.transactionsMonth > 0 && (
-        <div className="mb-12 reveal reveal-6">
-          <Card>
-            <RaulPanel month={summary.month} />
-          </Card>
-        </div>
-      )}
-
-      {/* Category breakdown (current month) + Category trend (last 6 months) */}
-      <CategoryDashboardSection
-        monthLabel={monthLabel}
-        currentMonth={summary?.month}
-        catRows={catRows}
-        catTrend={catTrend}
-      />
 
       {/* Banks list */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
