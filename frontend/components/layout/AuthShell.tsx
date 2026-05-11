@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { useTheme } from '../../hooks/useTheme'
 import { BrandLogo } from '../ui/BrandLogo'
 
@@ -14,14 +15,28 @@ export function AuthShell({ eyebrow, title, subtitle, children }: Props) {
   const { theme, toggle } = useTheme()
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center text-center px-6 py-10 overflow-hidden">
-      {/* Floating theme toggle */}
-      <button
-        onClick={toggle}
-        aria-label={theme === 'dark' ? 'Zapnúť svetlý režim' : 'Zapnúť tmavý režim'}
-        className="absolute top-5 right-5 z-10 font-heading text-[0.65rem] uppercase tracking-widest text-text-secondary hover:text-gold-bright border border-border-dim hover:border-gold bg-obsidian/60 backdrop-blur-sm px-3 py-1.5 rounded-[3px] transition-all duration-300"
-      >
-        {theme === 'dark' ? '☀ Lumos' : '☾ Nox'}
-      </button>
+      {/* Floating top-right cluster: info links + theme toggle */}
+      <div className="absolute top-5 right-5 z-10 flex items-center gap-2 flex-wrap justify-end max-w-[calc(100vw-2.5rem)]">
+        <Link
+          to="/ako-to-funguje"
+          className="font-heading text-[0.65rem] uppercase tracking-widest text-text-secondary hover:text-gold-bright border border-border-dim hover:border-gold bg-obsidian/60 backdrop-blur-sm px-3 py-1.5 rounded-[3px] transition-all duration-300"
+        >
+          🪄 Ako to funguje
+        </Link>
+        <Link
+          to="/bezpecnost"
+          className="font-heading text-[0.65rem] uppercase tracking-widest text-text-secondary hover:text-gold-bright border border-border-dim hover:border-gold bg-obsidian/60 backdrop-blur-sm px-3 py-1.5 rounded-[3px] transition-all duration-300"
+        >
+          🛡 Je to bezpečné
+        </Link>
+        <button
+          onClick={toggle}
+          aria-label={theme === 'dark' ? 'Zapnúť svetlý režim' : 'Zapnúť tmavý režim'}
+          className="font-heading text-[0.65rem] uppercase tracking-widest text-text-secondary hover:text-gold-bright border border-border-dim hover:border-gold bg-obsidian/60 backdrop-blur-sm px-3 py-1.5 rounded-[3px] transition-all duration-300"
+        >
+          {theme === 'dark' ? '☀ Lumos' : '☾ Nox'}
+        </button>
+      </div>
 
       {/* Background glow */}
       <div className="absolute inset-0 pointer-events-none">
@@ -30,7 +45,7 @@ export function AuthShell({ eyebrow, title, subtitle, children }: Props) {
         <div className="absolute bottom-1/4 right-1/5 w-72 h-72 rounded-full bg-cobalt/[0.06] blur-[100px]" />
       </div>
 
-      <p className="font-heading text-sm uppercase tracking-[0.4em] text-gold mb-6 reveal reveal-1">
+      <p className="font-heading text-sm uppercase tracking-[0.4em] text-gold mb-6 reveal reveal-1 mt-12 sm:mt-0">
         {eyebrow}
       </p>
 
@@ -48,6 +63,21 @@ export function AuthShell({ eyebrow, title, subtitle, children }: Props) {
       )}
 
       <div className="relative w-full max-w-md reveal reveal-4">{children}</div>
+
+      {/* Footer: legal links */}
+      <div className="relative z-10 mt-10 reveal reveal-5 flex items-center gap-3 text-[0.65rem] font-heading uppercase tracking-widest text-text-muted">
+        <Link to="/privacy" className="hover:text-gold-bright transition-colors">
+          Ochrana súkromia
+        </Link>
+        <span>·</span>
+        <Link to="/bezpecnost" className="hover:text-gold-bright transition-colors">
+          Bezpečnosť
+        </Link>
+        <span>·</span>
+        <Link to="/ako-to-funguje" className="hover:text-gold-bright transition-colors">
+          Ako to funguje
+        </Link>
+      </div>
     </section>
   )
 }

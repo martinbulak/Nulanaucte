@@ -1,7 +1,7 @@
 import logoUrl from '../../assets/logo.png'
 
 /**
- * Brand mark for "Nula na účte — tu uvidíš, na čo rozjebávaš lóve".
+ * Brand mark for "Nula na účte — Raul uprace tvojej financie. Lebo ty nevieš. Zadarmo.".
  *
  * Hand-drawn sepia sketch portrait — bushy beard + cigar.
  * Rendered as a circular crop with a subtle gold ring so it reads as a "mark"

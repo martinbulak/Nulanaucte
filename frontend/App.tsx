@@ -4,6 +4,9 @@ import { Register } from './pages/Register'
 import { Verify } from './pages/Verify'
 import { Forgot } from './pages/Forgot'
 import { Reset } from './pages/Reset'
+import { Privacy } from './pages/Privacy'
+import { Security } from './pages/Security'
+import { HowItWorks } from './pages/HowItWorks'
 import { Dashboard } from './pages/Dashboard'
 import { Banky } from './pages/Banky'
 import { Prijmy } from './pages/Prijmy'
@@ -38,6 +41,11 @@ export default function App() {
       <Route path="/verify" element={<Verify />} />
       <Route path="/forgot" element={<Forgot />} />
       <Route path="/reset" element={<Reset />} />
+
+      {/* Public info pages */}
+      <Route path="/privacy" element={<Privacy />} />
+      <Route path="/bezpecnost" element={<Security />} />
+      <Route path="/ako-to-funguje" element={<HowItWorks />} />
 
       {/* Protected app */}
       <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

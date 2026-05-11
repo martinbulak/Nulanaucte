@@ -1,6 +1,6 @@
 # Nula na účte
 
-> *tu uvidíš, na čo rozjebávaš lóve*
+> *Raul uprace tvojej financie. Lebo ty nevieš. Zadarmo.*
 
 Personal finance tracker s automatickým importom bankových výpisov (PDF/CSV/email),
 AI kategorizáciou výdavkov, mesačnými reportami a lebkou v čarodejníckom klobúku.

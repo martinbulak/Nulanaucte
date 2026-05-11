@@ -60,22 +60,43 @@ export async function sendEmail(
 // ---------------- Templates ----------------
 
 const BRAND = 'Nula na účte'
-const TAGLINE = 'tu uvidíš, na čo rozjebávaš lóve'
+const TAGLINE = 'Raul uprace tvojej financie. Lebo ty nevieš. Zadarmo.'
+
+// Light "parchment by candlelight" palette — mirrors the in-app Lumos theme.
+// All emails are sent in light mode regardless of the user's in-app preference,
+// because email clients render unpredictably with dark themes.
+const LIGHT = {
+  pageBg:    '#faf3e0', // void
+  cardBg:    '#fffef9', // obsidian
+  subtleBg:  '#f1e7cc', // stone
+  accentBg:  '#ede2c4', // dungeon
+  text:      '#1c1620', // text-primary
+  textSoft:  '#5a4527', // text-secondary
+  textMuted: '#8a7350', // text-muted
+  gold:      '#a07820',
+  goldBright:'#b8842a',
+  goldDim:   '#5a4500',
+  border:    'rgba(122,92,30,0.35)',
+  borderDim: 'rgba(122,92,30,0.15)',
+  ink:       '#0a0608', // text on gold buttons stays dark
+  crimson:   '#a52a2a',
+  emerald:   '#1a6b3a',
+}
 
 function shell(content: string): string {
   return `<!DOCTYPE html>
 <html lang="sk">
   <head><meta charset="utf-8"><title>${BRAND}</title></head>
-  <body style="margin:0;padding:0;background:#0a0608;font-family:Georgia,serif;color:#f4ead5;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0608;">
+  <body style="margin:0;padding:0;background:${LIGHT.pageBg};font-family:Georgia,serif;color:${LIGHT.text};">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${LIGHT.pageBg};">
       <tr><td align="center" style="padding:40px 20px;">
-        <table role="presentation" width="100%" style="max-width:560px;background:#110d10;border:1px solid rgba(201,151,42,0.25);border-radius:6px;">
+        <table role="presentation" width="100%" style="max-width:560px;background:${LIGHT.cardBg};border:1px solid ${LIGHT.border};border-radius:6px;box-shadow:0 8px 32px rgba(90,69,39,0.12);">
           <tr><td style="padding:32px 36px;">
-            <p style="margin:0 0 6px 0;font-family:'Cinzel',serif;font-size:11px;text-transform:uppercase;letter-spacing:0.3em;color:#c9972a;">✦ ${BRAND} ✦</p>
-            <p style="margin:0 0 32px 0;font-family:'IM Fell English',Georgia,serif;font-style:italic;color:#b8a98a;font-size:13px;">${TAGLINE}</p>
+            <p style="margin:0 0 6px 0;font-family:'Cinzel',serif;font-size:11px;text-transform:uppercase;letter-spacing:0.3em;color:${LIGHT.gold};">✦ ${BRAND} ✦</p>
+            <p style="margin:0 0 32px 0;font-family:'IM Fell English',Georgia,serif;font-style:italic;color:${LIGHT.textSoft};font-size:13px;">${TAGLINE}</p>
             ${content}
-            <hr style="border:none;border-top:1px solid rgba(201,151,42,0.15);margin:32px 0 16px 0;">
-            <p style="margin:0;font-size:11px;color:#7a6a52;font-family:'Cinzel',serif;text-transform:uppercase;letter-spacing:0.2em;text-align:center;">Sova dorúčila tento list automaticky</p>
+            <hr style="border:none;border-top:1px solid ${LIGHT.borderDim};margin:32px 0 16px 0;">
+            <p style="margin:0;font-size:11px;color:${LIGHT.textMuted};font-family:'Cinzel',serif;text-transform:uppercase;letter-spacing:0.2em;text-align:center;">Sova dorúčila tento list automaticky</p>
           </td></tr>
         </table>
       </td></tr>
@@ -86,8 +107,8 @@ function shell(content: string): string {
 
 function button(href: string, label: string): string {
   return `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:20px 0;">
-  <tr><td style="background:#c9972a;border-radius:3px;">
-    <a href="${href}" style="display:inline-block;padding:12px 28px;font-family:'Cinzel',serif;text-transform:uppercase;letter-spacing:0.18em;font-size:13px;color:#0a0608;text-decoration:none;font-weight:600;">${label}</a>
+  <tr><td style="background:${LIGHT.gold};border-radius:3px;box-shadow:0 2px 8px rgba(160,120,32,0.25);">
+    <a href="${href}" style="display:inline-block;padding:12px 28px;font-family:'Cinzel',serif;text-transform:uppercase;letter-spacing:0.18em;font-size:13px;color:${LIGHT.ink};text-decoration:none;font-weight:600;">${label}</a>
   </td></tr>
 </table>`
 }
@@ -97,11 +118,11 @@ export function verifyEmailTemplate(verifyUrl: string, name: string | null) {
   return {
     subject: '✦ Potvrď svoju adresu — Nula na účte',
     html: shell(`
-      <h2 style="margin:0 0 12px 0;font-family:'Cinzel',serif;font-size:22px;color:#f4ead5;letter-spacing:0.05em;">${greet}</h2>
-      <p style="margin:0 0 16px 0;line-height:1.6;color:#b8a98a;">Aby si mohol vstúpiť do trezora, klikni na tlačidlo nižšie a potvrď svoju emailovú adresu. Link je platný 24 hodín.</p>
+      <h2 style="margin:0 0 12px 0;font-family:'Cinzel',serif;font-size:22px;color:${LIGHT.text};letter-spacing:0.05em;">${greet}</h2>
+      <p style="margin:0 0 16px 0;line-height:1.6;color:${LIGHT.textSoft};">Aby si mohol vstúpiť do trezora, klikni na tlačidlo nižšie a potvrď svoju emailovú adresu. Link je platný 24 hodín.</p>
       ${button(verifyUrl, '⚡ Potvrdiť email')}
-      <p style="margin:16px 0 0 0;font-size:12px;color:#7a6a52;">Alebo skopíruj túto adresu do prehliadača:<br><span style="word-break:break-all;color:#c9972a;">${verifyUrl}</span></p>
-      <p style="margin:24px 0 0 0;font-size:12px;color:#7a6a52;font-style:italic;">Ak si sa neregistroval/a, tento mail ignoruj. Sova zletí preč.</p>
+      <p style="margin:16px 0 0 0;font-size:12px;color:${LIGHT.textMuted};">Alebo skopíruj túto adresu do prehliadača:<br><span style="word-break:break-all;color:${LIGHT.gold};">${verifyUrl}</span></p>
+      <p style="margin:24px 0 0 0;font-size:12px;color:${LIGHT.textMuted};font-style:italic;">Ak si sa neregistroval/a, tento mail ignoruj. Sova zletí preč.</p>
     `),
     text: `${greet}\n\nPotvrď svoj email kliknutím na tento odkaz (platný 24h):\n${verifyUrl}\n\nAk si sa neregistroval/a, tento mail ignoruj.`,
   }
@@ -112,11 +133,11 @@ export function passwordResetTemplate(resetUrl: string, name: string | null) {
   return {
     subject: '✦ Reset hesla — Nula na účte',
     html: shell(`
-      <h2 style="margin:0 0 12px 0;font-family:'Cinzel',serif;font-size:22px;color:#f4ead5;letter-spacing:0.05em;">${greet},</h2>
-      <p style="margin:0 0 16px 0;line-height:1.6;color:#b8a98a;">Niekto (snáď ty) požiadal o reset hesla. Klikni na tlačidlo nižšie a nastav si nové. Link je platný <strong style="color:#f0c040;">30 minút</strong>.</p>
+      <h2 style="margin:0 0 12px 0;font-family:'Cinzel',serif;font-size:22px;color:${LIGHT.text};letter-spacing:0.05em;">${greet},</h2>
+      <p style="margin:0 0 16px 0;line-height:1.6;color:${LIGHT.textSoft};">Niekto (snáď ty) požiadal o reset hesla. Klikni na tlačidlo nižšie a nastav si nové. Link je platný <strong style="color:${LIGHT.goldBright};">30 minút</strong>.</p>
       ${button(resetUrl, '🔑 Nastaviť nové heslo')}
-      <p style="margin:16px 0 0 0;font-size:12px;color:#7a6a52;">Alebo:<br><span style="word-break:break-all;color:#c9972a;">${resetUrl}</span></p>
-      <p style="margin:24px 0 0 0;font-size:12px;color:#7a6a52;font-style:italic;">Ak si o reset nežiadal/a, mail ignoruj. Tvoje súčasné heslo zostáva platné.</p>
+      <p style="margin:16px 0 0 0;font-size:12px;color:${LIGHT.textMuted};">Alebo:<br><span style="word-break:break-all;color:${LIGHT.gold};">${resetUrl}</span></p>
+      <p style="margin:24px 0 0 0;font-size:12px;color:${LIGHT.textMuted};font-style:italic;">Ak si o reset nežiadal/a, mail ignoruj. Tvoje súčasné heslo zostáva platné.</p>
     `),
     text: `${greet},\n\nNiekto požiadal o reset hesla. Otvor tento odkaz (platný 30 min):\n${resetUrl}\n\nAk si nežiadal/a o reset, ignoruj.`,
   }

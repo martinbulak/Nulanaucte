@@ -45,7 +45,7 @@ export function Login() {
           Nula <span className="text-gold-bright">na účte</span>
         </>
       }
-      subtitle="tu uvidíš, na čo rozjebávaš lóve"
+      subtitle="Raul uprace tvojej financie. Lebo ty nevieš. Zadarmo."
     >
       <AuthCard>
         <h2 className="font-heading text-xl text-gold tracking-widest uppercase mb-1">

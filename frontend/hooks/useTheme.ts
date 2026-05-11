@@ -13,7 +13,8 @@ function readInitial(): Theme {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved === 'light' || saved === 'dark') return saved
   }
-  return 'dark'
+  // Default = Lumos (light). Users can toggle to Nox (dark) and we persist it.
+  return 'light'
 }
 
 export function useTheme() {
