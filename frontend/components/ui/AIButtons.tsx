@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../../utils/api'
+import { BrandLogo } from './BrandLogo'
 
 const PRIMARY =
   'font-heading text-xs uppercase tracking-widest text-ink bg-gradient-to-br from-gold-bright via-gold to-gold-dim px-5 py-2 rounded-[3px] [box-shadow:0_2px_8px_rgba(201,151,42,0.3)] hover:-translate-y-px transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed'
@@ -272,14 +273,17 @@ export function RaulPanel({
 
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-4 gap-3 flex-wrap">
-        <div>
-          <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted mb-1">
-            ✦ Veštba z Komnaty galeónov
-          </p>
-          <h2 className="font-heading text-xl text-text-primary tracking-wide">
-            Raul, kde mi miznú galeóny?
-          </h2>
+      <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <BrandLogo className="w-12 h-12 md:w-14 md:h-14" />
+          <div>
+            <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted mb-1">
+              ✦ Veštba z Komnaty galeónov
+            </p>
+            <h2 className="font-heading text-xl text-text-primary tracking-wide">
+              Raul, kde mi miznú galeóny?
+            </h2>
+          </div>
         </div>
         <button onClick={generate} disabled={busy} className={PRIMARY}>
           {phase === 'analyzing' && '✦ Raul číta tvoj výpis…'}

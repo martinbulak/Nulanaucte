@@ -1,6 +1,11 @@
 import { Resend } from 'resend'
 import { env } from '../env.js'
 
+/** Public URL of the Raul medallion (served as a static file by Vite/Vercel). */
+function logoUrl(): string {
+  return `${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/raul.png`
+}
+
 let resendClient: Resend | null = null
 function getClient(): Resend | null {
   if (!env.RESEND_API_KEY) return null
@@ -92,8 +97,17 @@ function shell(content: string): string {
       <tr><td align="center" style="padding:40px 20px;">
         <table role="presentation" width="100%" style="max-width:560px;background:${LIGHT.cardBg};border:1px solid ${LIGHT.border};border-radius:6px;box-shadow:0 8px 32px rgba(90,69,39,0.12);">
           <tr><td style="padding:32px 36px;">
-            <p style="margin:0 0 6px 0;font-family:'Cinzel',serif;font-size:11px;text-transform:uppercase;letter-spacing:0.3em;color:${LIGHT.gold};">✦ ${BRAND} ✦</p>
-            <p style="margin:0 0 32px 0;font-family:'IM Fell English',Georgia,serif;font-style:italic;color:${LIGHT.textSoft};font-size:13px;">${TAGLINE}</p>
+            <table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 18px 0;">
+              <tr>
+                <td style="vertical-align:middle;padding-right:14px;">
+                  <img src="${logoUrl()}" width="56" height="56" alt="Raul" style="display:block;width:56px;height:56px;border-radius:50%;border:0;outline:none;text-decoration:none;" />
+                </td>
+                <td style="vertical-align:middle;">
+                  <p style="margin:0;font-family:'Cinzel',serif;font-size:11px;text-transform:uppercase;letter-spacing:0.3em;color:${LIGHT.gold};">✦ ${BRAND} ✦</p>
+                  <p style="margin:4px 0 0 0;font-family:'IM Fell English',Georgia,serif;font-style:italic;color:${LIGHT.textSoft};font-size:13px;">${TAGLINE}</p>
+                </td>
+              </tr>
+            </table>
             ${content}
             <hr style="border:none;border-top:1px solid ${LIGHT.borderDim};margin:32px 0 16px 0;">
             <p style="margin:0;font-size:11px;color:${LIGHT.textMuted};font-family:'Cinzel',serif;text-transform:uppercase;letter-spacing:0.2em;text-align:center;">Sova dorúčila tento list automaticky</p>

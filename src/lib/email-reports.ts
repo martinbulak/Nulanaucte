@@ -1,5 +1,10 @@
 import type { SendEmailInput } from './email.js'
 
+/** Public URL of the Raul medallion (must be a fully-qualified URL for email). */
+function logoUrl(ctaUrl: string): string {
+  return `${ctaUrl.replace(/\/$/, '')}/raul.png`
+}
+
 const eur = (n: number) =>
   new Intl.NumberFormat('sk-SK', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
 
@@ -43,8 +48,17 @@ function shell(content: string, ctaUrl: string): string {
   <tr><td align="center" style="padding:32px 16px;">
     <table role="presentation" width="100%" style="max-width:640px;background:${LIGHT.cardBg};border:1px solid ${LIGHT.border};border-radius:6px;box-shadow:0 8px 32px rgba(90,69,39,0.12);">
       <tr><td style="padding:32px 36px;">
-        <p style="margin:0 0 6px 0;font-family:'Cinzel',serif;font-size:11px;text-transform:uppercase;letter-spacing:0.3em;color:${LIGHT.gold};">✦ ${BRAND} ✦</p>
-        <p style="margin:0 0 24px 0;font-family:'IM Fell English',Georgia,serif;font-style:italic;color:${LIGHT.textSoft};font-size:13px;">${TAGLINE}</p>
+        <table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 18px 0;">
+          <tr>
+            <td style="vertical-align:middle;padding-right:14px;">
+              <img src="${logoUrl(ctaUrl)}" width="56" height="56" alt="Raul" style="display:block;width:56px;height:56px;border-radius:50%;border:0;outline:none;text-decoration:none;" />
+            </td>
+            <td style="vertical-align:middle;">
+              <p style="margin:0;font-family:'Cinzel',serif;font-size:11px;text-transform:uppercase;letter-spacing:0.3em;color:${LIGHT.gold};">✦ ${BRAND} ✦</p>
+              <p style="margin:4px 0 0 0;font-family:'IM Fell English',Georgia,serif;font-style:italic;color:${LIGHT.textSoft};font-size:13px;">${TAGLINE}</p>
+            </td>
+          </tr>
+        </table>
         ${content}
         <table role="presentation" cellspacing="0" cellpadding="0" style="margin:28px 0 4px 0;">
           <tr><td style="background:${LIGHT.gold};border-radius:3px;box-shadow:0 2px 8px rgba(160,120,32,0.25);">
@@ -99,7 +113,7 @@ function changesBox(changes: Array<{ category: string; delta: number; pct: numbe
   </div>`
 }
 
-function recommendationsBox(content: string): string {
+function recommendationsBox(content: string, ctaUrl: string): string {
   if (!content) return ''
   // Convert minimal markdown → HTML (bold, italic, line breaks, list items)
   const html = escapeHtml(content)
@@ -112,7 +126,16 @@ function recommendationsBox(content: string): string {
     .replace(/\n\n/g, '<br><br>')
     .replace(/\n/g, '<br>')
   return `<div style="background:${LIGHT.accentBg};border-radius:4px;padding:18px 22px;margin-top:24px;border:1px solid ${LIGHT.borderDim};">
-    <p style="margin:0 0 10px 0;font-family:'Cinzel',serif;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:${LIGHT.gold};">✦ Raul si všimol</p>
+    <table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 10px 0;">
+      <tr>
+        <td style="vertical-align:middle;padding-right:10px;">
+          <img src="${logoUrl(ctaUrl)}" width="40" height="40" alt="Raul" style="display:block;width:40px;height:40px;border-radius:50%;border:0;" />
+        </td>
+        <td style="vertical-align:middle;">
+          <p style="margin:0;font-family:'Cinzel',serif;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:${LIGHT.gold};">✦ Raul si všimol</p>
+        </td>
+      </tr>
+    </table>
     <div style="font-family:'IM Fell English',Georgia,serif;color:${LIGHT.text};line-height:1.6;">${html}</div>
   </div>`
 }
@@ -142,7 +165,7 @@ export function weeklyReportTemplate(
     <h3 style="margin:24px 0 8px 0;font-family:'Cinzel',serif;color:${LIGHT.text};font-size:16px;letter-spacing:0.05em;">Top kategórie</h3>
     ${categoriesTable(data.topCategories)}
     ${changesBox(data.changeVsLast)}
-    ${recommendationsBox(data.recommendations)}`,
+    ${recommendationsBox(data.recommendations, origin)}`,
     origin,
   )
   const text = `${greet}\n\nTýždenný výpis ${data.period.from} – ${data.period.to}\n\nPríjmy: +${eur(data.totalIncome)}\nVýdavky: −${eur(data.totalExpense)}\nBilancia: ${eur(net)}\n\nOtvoriť: ${origin}`
@@ -181,7 +204,7 @@ export function monthlyReportTemplate(
     </ul>`
         : ''
     }
-    ${recommendationsBox(data.recommendations)}`,
+    ${recommendationsBox(data.recommendations, origin)}`,
     origin,
   )
   const text = `${greet}\n\nMesačný výpis ${data.period.label}\n\nPríjmy: +${eur(data.totalIncome)}\nVýdavky: −${eur(data.totalExpense)}\nBilancia: ${eur(net)}\n\nOtvoriť: ${origin}`
