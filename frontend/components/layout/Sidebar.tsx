@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 import type { AuthUser } from '../../hooks/useAuth'
 import { useTheme } from '../../hooks/useTheme'
 import { BrandLogo } from '../ui/BrandLogo'
+import { PoweredBy } from '../ui/PoweredBy'
 
 interface NavItem {
   to: string
@@ -87,6 +88,11 @@ export function Sidebar({ user, onLogout }: Props) {
           ),
         )}
       </nav>
+
+      {/* Brand credits — above the theme toggle */}
+      <div className="px-4 py-3 border-t border-border-dim">
+        <PoweredBy variant="stack" />
+      </div>
 
       {/* Theme toggle */}
       <div className="px-4 py-3 border-t border-border-dim">

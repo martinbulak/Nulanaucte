@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useTheme } from '../../hooks/useTheme'
 import { BrandLogo } from '../ui/BrandLogo'
+import { PoweredBy } from '../ui/PoweredBy'
 
 interface Props {
   eyebrow: string
@@ -64,19 +65,22 @@ export function AuthShell({ eyebrow, title, subtitle, children }: Props) {
 
       <div className="relative w-full max-w-md reveal reveal-4">{children}</div>
 
-      {/* Footer: legal links */}
-      <div className="relative z-10 mt-10 reveal reveal-5 flex items-center gap-3 text-[0.65rem] font-heading uppercase tracking-widest text-text-muted">
-        <Link to="/privacy" className="hover:text-gold-bright transition-colors">
-          Ochrana súkromia
-        </Link>
-        <span>·</span>
-        <Link to="/bezpecnost" className="hover:text-gold-bright transition-colors">
-          Bezpečnosť
-        </Link>
-        <span>·</span>
-        <Link to="/ako-to-funguje" className="hover:text-gold-bright transition-colors">
-          Ako to funguje
-        </Link>
+      {/* Footer: brand credits + legal links */}
+      <div className="relative z-10 mt-10 reveal reveal-5 flex flex-col items-center gap-4">
+        <PoweredBy variant="row" />
+        <div className="flex items-center gap-3 text-[0.65rem] font-heading uppercase tracking-widest text-text-muted">
+          <Link to="/privacy" className="hover:text-gold-bright transition-colors">
+            Ochrana súkromia
+          </Link>
+          <span>·</span>
+          <Link to="/bezpecnost" className="hover:text-gold-bright transition-colors">
+            Bezpečnosť
+          </Link>
+          <span>·</span>
+          <Link to="/ako-to-funguje" className="hover:text-gold-bright transition-colors">
+            Ako to funguje
+          </Link>
+        </div>
       </div>
     </section>
   )
