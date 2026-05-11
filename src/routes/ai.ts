@@ -5,6 +5,7 @@ import {
   applyCategoryUpdates,
   categorySummary,
   getLatestRecommendation,
+  listReanalyzableTransactions,
   listTransactions,
   listUncategorizedTransactions,
   listUserCategories,
@@ -58,12 +59,33 @@ aiRoutes.get('/categories', async (c) => {
 
 aiRoutes.post('/categorize', async (c) => {
   const user = c.get('user')
-  // Default: process up to 200 uncategorized transactions
-  const txs = await listUncategorizedTransactions(user.id, 200)
+  // Parse optional { force: boolean } body.
+  // force=false (default): only re-categorize uncategorized ("system") transactions
+  // force=true: re-categorize ALL transactions EXCEPT those manually set by the user
+  let force = false
+  try {
+    const body = (await c.req.json()) as { force?: unknown }
+    if (body && typeof body.force === 'boolean') force = body.force
+  } catch {
+    /* no body or invalid JSON — keep default */
+  }
+
+  const txs = force
+    ? await listReanalyzableTransactions(user.id, 500)
+    : await listUncategorizedTransactions(user.id, 200)
+
   if (txs.length === 0) {
     return c.json({
       ok: true,
-      data: { processed: 0, updated: 0, usedAI: false, note: 'Žiadne nezaradené transakcie.' },
+      data: {
+        processed: 0,
+        updated: 0,
+        usedAI: false,
+        mode: force ? 'force' : 'uncategorized',
+        note: force
+          ? 'Žiadne transakcie na pretriedenie (všetky sú ručne upravené alebo neexistujú).'
+          : 'Žiadne nezaradené transakcie.',
+      },
     })
   }
   const minimal = txs.map((t) => ({
@@ -88,6 +110,7 @@ aiRoutes.post('/categorize', async (c) => {
       updated,
       usedAI: result.usedAI,
       tokens: result.tokens,
+      mode: force ? 'force' : 'uncategorized',
     },
   })
 })

@@ -344,6 +344,29 @@ export async function listUncategorizedTransactions(
   return rows.map(rowToTransaction)
 }
 
+/**
+ * Returns transactions for forced re-categorization: all transactions EXCEPT
+ * those manually set by the user. AI-set and system-set categories will be
+ * re-evaluated; user overrides are preserved.
+ */
+export async function listReanalyzableTransactions(
+  userId: number,
+  limit = 500,
+): Promise<Transaction[]> {
+  const rows = await db
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.userId, userId),
+        sqlOp`${transactions.categorizedBy} <> 'user'`,
+      ),
+    )
+    .orderBy(desc(transactions.date))
+    .limit(limit)
+  return rows.map(rowToTransaction)
+}
+
 export interface CategoryUpdate {
   id: number
   category: string

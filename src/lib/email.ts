@@ -60,7 +60,7 @@ export async function sendEmail(
 // ---------------- Templates ----------------
 
 const BRAND = 'Nula na účte'
-const TAGLINE = 'Raul uprace tvojej financie. Lebo ty nevieš. Zadarmo.'
+const TAGLINE = 'Raul uprace tvoje financie. Lebo ty nevieš. Zadarmo.'
 
 // Light "parchment by candlelight" palette — mirrors the in-app Lumos theme.
 // All emails are sent in light mode regardless of the user's in-app preference,

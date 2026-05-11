@@ -4,17 +4,39 @@ import { apiFetch } from '../../utils/api'
 const PRIMARY =
   'font-heading text-xs uppercase tracking-widest text-ink bg-gradient-to-br from-gold-bright via-gold to-gold-dim px-5 py-2 rounded-[3px] [box-shadow:0_2px_8px_rgba(201,151,42,0.3)] hover:-translate-y-px transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed'
 
+const SECONDARY =
+  'font-heading text-xs uppercase tracking-widest text-gold border border-gold/40 hover:border-gold-bright hover:text-gold-bright bg-stone/40 px-4 py-2 rounded-[3px] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed'
+
 interface CategorizeResult {
   processed: number
   updated: number
   usedAI: boolean
+  mode?: 'force' | 'uncategorized'
   note?: string
   tokens?: number
 }
 
 type Phase = 'idle' | 'fetching' | 'ai' | 'rules' | 'done' | 'error'
 
-export function CategorizeButton({ onDone }: { onDone?: () => void }) {
+interface CategorizeButtonProps {
+  onDone?: () => void
+  /**
+   * If true, server re-categorizes ALL transactions (except user-locked ones).
+   * If false (default), only "system"-tagged uncategorized transactions are processed.
+   */
+  force?: boolean
+  /** Override the button label (each phase). */
+  label?: string
+  /** Visual variant — "primary" (gold gradient) or "secondary" (outline). */
+  variant?: 'primary' | 'secondary'
+}
+
+export function CategorizeButton({
+  onDone,
+  force = false,
+  label,
+  variant = 'primary',
+}: CategorizeButtonProps) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [result, setResult] = useState<CategorizeResult | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -33,7 +55,10 @@ export function CategorizeButton({ onDone }: { onDone?: () => void }) {
     const t2 = setTimeout(() => setPhase('rules'), 3500)
 
     try {
-      const res = await apiFetch<CategorizeResult>('/api/ai/categorize', { method: 'POST' })
+      const res = await apiFetch<CategorizeResult>('/api/ai/categorize', {
+        method: 'POST',
+        body: JSON.stringify({ force }),
+      })
       clearInterval(ticker)
       clearTimeout(t1)
       clearTimeout(t2)
@@ -55,23 +80,26 @@ export function CategorizeButton({ onDone }: { onDone?: () => void }) {
   }
 
   const busy = phase === 'fetching' || phase === 'ai' || phase === 'rules'
+  const buttonClass = variant === 'primary' ? PRIMARY : SECONDARY
+  const idleLabel = label ?? (force ? '🔄 Pretriediť všetko znovu' : '🔮 Roztriediť výdavky kúzlom')
 
   return (
     <div className="inline-flex flex-col items-start gap-1.5 max-w-full">
-      <button onClick={run} disabled={busy} className={PRIMARY}>
-        {phase === 'idle' && '🔮 Roztriediť výdavky kúzlom'}
+      <button onClick={run} disabled={busy} className={buttonClass}>
+        {phase === 'idle' && idleLabel}
         {phase === 'fetching' && '✦ Zhromažďujem pergameny…'}
         {phase === 'ai' && '🪄 Vyvolávam AI duchov…'}
         {phase === 'rules' && '🔮 Triedim transakcie…'}
-        {phase === 'done' && '🔮 Roztriediť výdavky kúzlom'}
-        {phase === 'error' && '🔮 Roztriediť výdavky kúzlom'}
+        {phase === 'done' && idleLabel}
+        {phase === 'error' && idleLabel}
       </button>
 
       {busy && (
         <div className="font-ui italic text-xs text-text-secondary flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-gold animate-pulse" />
           <span>
-            {phase === 'fetching' && 'Načítavam nezaradené transakcie…'}
+            {phase === 'fetching' &&
+              (force ? 'Načítavam všetky transakcie…' : 'Načítavam nezaradené transakcie…')}
             {phase === 'ai' && `AI číta tvoje transakcie · ${elapsed}s`}
             {phase === 'rules' && `Triedi do kategórií · ${elapsed}s`}
           </span>
@@ -104,10 +132,11 @@ function ResultPill({
   result: CategorizeResult
   onDismiss: () => void
 }) {
+  const isForce = result.mode === 'force'
   if (result.processed === 0) {
     return (
       <div className="font-ui italic text-xs text-text-secondary flex items-center gap-2">
-        <span>✓ Všetky transakcie sú už zaradené.</span>
+        <span>{result.note ?? '✓ Všetky transakcie sú už zaradené.'}</span>
         <button onClick={onDismiss} className="underline text-text-muted hover:text-text-primary">
           OK
         </button>
@@ -117,7 +146,8 @@ function ResultPill({
   return (
     <div className="font-ui text-xs leading-relaxed bg-gold/10 border border-gold/30 rounded-[3px] px-3 py-2 max-w-md">
       <p className={result.usedAI ? 'text-gold-bright' : 'text-text-secondary'}>
-        ✓ Roztriedil som <strong>{result.updated}</strong> transakcií{' '}
+        ✓ {isForce ? 'Pretriedil som znovu' : 'Roztriedil som'}{' '}
+        <strong>{result.updated}</strong> z {result.processed} transakcií{' '}
         {result.usedAI ? (
           <>
             <strong>cez AI</strong>
@@ -158,12 +188,25 @@ interface RaulResult {
 
 type RaulPhase = 'idle' | 'loading' | 'analyzing' | 'writing' | 'done' | 'error'
 
-export function RaulPanel({ month }: { month: string }) {
+/**
+ * If hasTransactionsInMonth=true and no cached recommendation exists for the
+ * current month, RaulPanel auto-triggers generate() once on first load. This
+ * makes the dashboard feel "alive" — user sees Raul commentary without an
+ * extra click. Subsequent visits use the cached recommendation (no AI cost).
+ */
+export function RaulPanel({
+  month,
+  autoGenerate = true,
+}: {
+  month: string
+  autoGenerate?: boolean
+}) {
   const [data, setData] = useState<RaulData | null>(null)
   const [phase, setPhase] = useState<RaulPhase>('loading')
   const [usedAI, setUsedAI] = useState<boolean | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [err, setErr] = useState<string | null>(null)
+  const [autoTriggered, setAutoTriggered] = useState<string | null>(null)
 
   // Load existing recommendation whenever the month prop changes
   // (fixes blank-screen bug from calling load() during render).
@@ -182,6 +225,19 @@ export function RaulPanel({ month }: { month: string }) {
       alive = false
     }
   }, [month])
+
+  // Auto-trigger first generation when there's no cached recommendation for
+  // this month. Guarded by autoTriggered so we don't spam the API on
+  // re-renders or on cached-load. Only fires once per month per mount.
+  useEffect(() => {
+    if (!autoGenerate) return
+    if (phase !== 'idle') return
+    if (data?.recommendation) return // cached one already loaded
+    if (autoTriggered === month) return
+    setAutoTriggered(month)
+    void generate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoGenerate, phase, data, month])
 
   async function generate() {
     setErr(null)

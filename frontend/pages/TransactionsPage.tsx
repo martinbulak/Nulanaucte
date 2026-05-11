@@ -240,7 +240,14 @@ export function TransactionsPage({ type }: Props) {
             </h2>
             <div className="flex items-center gap-3 flex-wrap">
               {type === 'vydavok' && (
-                <CategorizeButton onDone={() => load(month)} />
+                <>
+                  <CategorizeButton onDone={() => load(month)} />
+                  <CategorizeButton
+                    force
+                    variant="secondary"
+                    onDone={() => load(month)}
+                  />
+                </>
               )}
               <Link
                 to="/banky"

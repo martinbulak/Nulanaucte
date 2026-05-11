@@ -72,7 +72,7 @@ export function InfoShell({ eyebrow, title, children, backTo, backLabel = '← S
         </div>
 
         <p className="mt-6 text-center font-ui text-xs text-text-muted italic">
-          ✦ Nula na účte — Raul uprace tvojej financie. Lebo ty nevieš. Zadarmo. ✦
+          ✦ Nula na účte — Raul uprace tvoje financie. Lebo ty nevieš. Zadarmo. ✦
         </p>
       </div>
     </section>

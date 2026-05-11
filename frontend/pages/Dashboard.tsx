@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, StatCard } from '../components/ui/Card'
 import { MonthPicker, formatMonth } from '../components/ui/MonthPicker'
@@ -6,11 +6,26 @@ import {
   IncomeExpenseBarChart,
   HorizontalBars,
   Sparkline,
+  CategoryTrendChart,
+  CategoryLegend,
   type TrendPoint,
   type HBarItem,
+  type CategoryTrendPoint,
 } from '../components/ui/Charts'
 import { RaulPanel } from '../components/ui/AIButtons'
 import { apiFetch } from '../utils/api'
+
+interface CategoryRow {
+  category: string
+  total: number
+  count: number
+}
+
+interface CategoryTrend {
+  months: string[]
+  categories: string[]
+  points: CategoryTrendPoint[]
+}
 
 interface RecentTx {
   id: number
@@ -51,15 +66,6 @@ const eurExact = new Intl.NumberFormat('sk-SK', {
   currency: 'EUR',
 })
 
-const CATEGORIES = [
-  { name: 'Bývanie', icon: '⌂', tone: 'gold' as const, hint: '2 hypotéky' },
-  { name: 'Jedlo / reštaurácie', icon: '◉', tone: 'crimson' as const, hint: 'každý deň' },
-  { name: 'Auto / leasing', icon: '◊', tone: 'cobalt' as const, hint: '~1 500 € / mes.' },
-  { name: 'Dovolenky / zábava', icon: '✦', tone: 'gold' as const, hint: 'každý mesiac' },
-  { name: 'Predplatné', icon: '⌬', tone: 'cobalt' as const, hint: 'služby' },
-  { name: 'Iné', icon: '⌘', tone: 'crimson' as const, hint: 'mix' },
-]
-
 const BANKS = ['Slovenská sporiteľňa', 'Tatra banka', 'Revolut']
 
 function currentYearMonth(): string {
@@ -70,13 +76,19 @@ function currentYearMonth(): string {
 export function Dashboard() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [trend, setTrend] = useState<TrendPoint[]>([])
+  const [catTrend, setCatTrend] = useState<CategoryTrend | null>(null)
+  const [catRows, setCatRows] = useState<CategoryRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [month, setMonth] = useState<string>(currentYearMonth())
 
   const load = useCallback(async (m: string) => {
-    const [sumRes, trendRes] = await Promise.all([
+    const [sumRes, trendRes, catTrendRes, catRowsRes] = await Promise.all([
       apiFetch<Summary>(`/api/dashboard/summary?month=${encodeURIComponent(m)}`),
       apiFetch<TrendPoint[]>('/api/dashboard/trend?months=6'),
+      apiFetch<CategoryTrend>('/api/dashboard/category-trend?months=6'),
+      apiFetch<{ month: string; vydavky: CategoryRow[]; prijmy: CategoryRow[] }>(
+        `/api/dashboard/categories?month=${encodeURIComponent(m)}`,
+      ),
     ])
     if (sumRes.ok) {
       setSummary(sumRes.data)
@@ -85,6 +97,8 @@ export function Dashboard() {
       setError(sumRes.error)
     }
     if (trendRes.ok) setTrend(trendRes.data)
+    if (catTrendRes.ok) setCatTrend(catTrendRes.data)
+    if (catRowsRes.ok) setCatRows(catRowsRes.data.vydavky)
   }, [])
 
   useEffect(() => {
@@ -344,51 +358,17 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Two-column section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 reveal reveal-6">
-          <Card>
-            <div className="flex items-baseline justify-between mb-5">
-              <div>
-                <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted mb-1">
-                  ✦ Kniha výdavkov
-                </p>
-                <h2 className="font-heading text-xl text-text-primary tracking-wide">
-                  Tvoje kategórie
-                </h2>
-              </div>
-              <span className="font-heading text-[0.6rem] uppercase tracking-widest text-gold border border-gold/30 bg-gold/10 px-2 py-0.5 rounded-[2px]">
-                6 kategórií
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {CATEGORIES.map((c) => {
-                const toneText =
-                  c.tone === 'gold'
-                    ? 'text-gold-bright'
-                    : c.tone === 'crimson'
-                    ? 'text-crimson-bright'
-                    : 'text-cobalt-bright'
-                return (
-                  <div
-                    key={c.name}
-                    className="flex items-center gap-4 px-4 py-3 bg-stone/50 border border-border-dim rounded-[3px] hover:border-border-bright hover:bg-stone/80 transition-all duration-200"
-                  >
-                    <span className={`text-xl ${toneText}`}>{c.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-heading text-sm text-text-primary tracking-wide">
-                        {c.name}
-                      </p>
-                      <p className="font-ui text-xs text-text-muted italic">{c.hint}</p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </Card>
-        </div>
+      {/* Category breakdown (current month) + Category trend (last 6 months) */}
+      <CategoryDashboardSection
+        monthLabel={monthLabel}
+        currentMonth={summary?.month}
+        catRows={catRows}
+        catTrend={catTrend}
+      />
 
-        <div className="reveal reveal-6">
+      {/* Banks list */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="reveal reveal-6 lg:col-span-1">
           <Card>
             <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted mb-1">
               ✦ Trezory
@@ -424,6 +404,115 @@ export function Dashboard() {
 // BankBreakdown — derives top spending banks from the recent tx list
 // included in the dashboard summary (no extra fetch needed).
 // ----------------------------------------------------------------
+
+// ----------------------------------------------------------------
+// CategoryDashboardSection — category breakdown (current month) +
+// long-term stacked category trend (last 6 months). Used on Dashboard.
+// ----------------------------------------------------------------
+
+interface CategoryDashboardProps {
+  monthLabel: string
+  currentMonth: string | undefined
+  catRows: CategoryRow[]
+  catTrend: CategoryTrend | null
+}
+
+function CategoryDashboardSection({
+  monthLabel,
+  currentMonth,
+  catRows,
+  catTrend,
+}: CategoryDashboardProps) {
+  // Sort + slice to top 8 for the breakdown card; rest collapses into "Iné" row
+  const breakdownItems = useMemo<HBarItem[]>(() => {
+    if (catRows.length === 0) return []
+    const sorted = [...catRows].sort((a, b) => b.total - a.total)
+    const top = sorted.slice(0, 8)
+    const rest = sorted.slice(8)
+    const items: HBarItem[] = top.map((c) => ({
+      label: c.category,
+      value: c.total,
+      hint: `${c.count}×`,
+    }))
+    if (rest.length > 0) {
+      const restTotal = rest.reduce((s, r) => s + r.total, 0)
+      const restCount = rest.reduce((s, r) => s + r.count, 0)
+      items.push({
+        label: `+${rest.length} ďalších`,
+        value: restTotal,
+        hint: `${restCount}×`,
+      })
+    }
+    return items
+  }, [catRows])
+
+  const totalSpend = catRows.reduce((s, c) => s + c.total, 0)
+
+  return (
+    <div className="mb-12 grid grid-cols-1 lg:grid-cols-3 gap-5">
+      {/* Long-term stacked trend */}
+      <div className="lg:col-span-2 reveal reveal-6">
+        <Card>
+          <div className="flex items-baseline justify-between mb-4 flex-wrap gap-3">
+            <div>
+              <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted mb-1">
+                ✦ Posledných 6 mesiacov · podľa kategórií
+              </p>
+              <h2 className="font-heading text-xl text-text-primary tracking-wide">
+                Kam tečú galeóny
+              </h2>
+            </div>
+            {catTrend && catTrend.categories.length > 0 && (
+              <CategoryLegend categories={catTrend.categories} />
+            )}
+          </div>
+          {catTrend && catTrend.points.length > 0 ? (
+            <CategoryTrendChart
+              data={catTrend.points}
+              categories={catTrend.categories}
+              highlightMonth={currentMonth}
+            />
+          ) : (
+            <p className="font-ui italic text-text-muted text-sm py-6 text-center">
+              Naimportuj viac mesiacov a uvidíš dlhodobý trend.
+            </p>
+          )}
+        </Card>
+      </div>
+
+      {/* Current-month category breakdown */}
+      <div className="reveal reveal-6">
+        <Card>
+          <div className="flex items-baseline justify-between mb-3 gap-3">
+            <div>
+              <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted mb-1">
+                ✦ Kniha výdavkov
+              </p>
+              <h3 className="font-heading text-base text-text-primary tracking-wide">
+                Kategórie · {monthLabel}
+              </h3>
+            </div>
+            {totalSpend > 0 && (
+              <span className="font-heading text-[0.6rem] uppercase tracking-widest text-crimson-bright whitespace-nowrap">
+                −{eur.format(totalSpend)}
+              </span>
+            )}
+          </div>
+          {breakdownItems.length === 0 ? (
+            <p className="font-ui italic text-text-muted text-sm py-3">
+              Žiadne výdavky v {monthLabel}.
+            </p>
+          ) : (
+            <HorizontalBars items={breakdownItems} tone="crimson" />
+          )}
+          <p className="mt-4 font-ui text-[0.7rem] italic text-text-muted">
+            Top 8 kategórií. Ostatné sa zlejú do „+ N ďalších".
+          </p>
+        </Card>
+      </div>
+    </div>
+  )
+}
 
 function BankBreakdown({ summary }: { summary: Summary | null }) {
   if (!summary) return null

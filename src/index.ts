@@ -12,6 +12,7 @@ import { reportsRoutes } from './routes/reports.js'
 import { adminRoutes } from './routes/admin.js'
 import { requireAuth } from './middleware/auth.js'
 import {
+  categorySummary,
   deleteAllTransactions,
   ensureSeeded,
   listBanks,
@@ -157,6 +158,98 @@ app.get('/api/dashboard/summary', requireAuth, async (c) => {
       },
     },
   })
+})
+
+app.get('/api/dashboard/categories', requireAuth, async (c) => {
+  const user = c.get('user')
+  const month = parseMonth(c.req.query('month'))
+  if (!month) {
+    return c.json({ ok: false, error: 'Neplatný formát mesiaca (YYYY-MM)' }, 400)
+  }
+  const [vydavkyByCat, prijemByCat] = await Promise.all([
+    categorySummary(user.id, month, 'vydavok'),
+    categorySummary(user.id, month, 'prijem'),
+  ])
+  return c.json({
+    ok: true,
+    data: {
+      month,
+      vydavky: vydavkyByCat,
+      prijmy: prijemByCat,
+    },
+  })
+})
+
+app.get('/api/dashboard/category-trend', requireAuth, async (c) => {
+  const user = c.get('user')
+  const monthsRaw = Number(c.req.query('months'))
+  const want = Number.isFinite(monthsRaw) ? Math.max(1, Math.min(12, monthsRaw)) : 6
+
+  const [allTxs, dataMonthsDesc] = await Promise.all([
+    listTransactions(user.id, { type: 'vydavok' }),
+    listMonthsWithData(user.id),
+  ])
+
+  // Same windowing logic as /trend — pick the most recent N months that have
+  // data, then pad with zero months at the front if the user has less than N
+  // months of history.
+  const dataMonthsAsc = [...dataMonthsDesc].sort()
+  let useMonths: string[]
+  if (dataMonthsAsc.length === 0) {
+    const now = new Date()
+    useMonths = []
+    for (let i = want - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      useMonths.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    }
+  } else if (dataMonthsAsc.length >= want) {
+    useMonths = dataMonthsAsc.slice(-want)
+  } else {
+    const earliest = dataMonthsAsc[0]
+    const [y, m] = earliest.split('-').map(Number)
+    useMonths = []
+    for (let i = want - dataMonthsAsc.length; i > 0; i--) {
+      const d = new Date(y, m - 1 - i, 1)
+      useMonths.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    }
+    useMonths.push(...dataMonthsAsc)
+  }
+
+  // For each month, sum amount per category. Then determine TOP 6 categories
+  // by aggregate spend across the whole window; everything else collapses to "Iné".
+  const totalByCat = new Map<string, number>()
+  const perMonth: Record<string, Map<string, number>> = {}
+  for (const ym of useMonths) perMonth[ym] = new Map()
+  for (const t of allTxs) {
+    const ym = t.date.slice(0, 7)
+    if (!perMonth[ym]) continue
+    const cat = t.category || 'Nezaradené'
+    perMonth[ym].set(cat, (perMonth[ym].get(cat) ?? 0) + t.amount)
+    totalByCat.set(cat, (totalByCat.get(cat) ?? 0) + t.amount)
+  }
+  const topCats = [...totalByCat.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([c]) => c)
+  const topSet = new Set(topCats)
+
+  const points = useMonths.map((ym) => {
+    const row: Record<string, number> = { __month: 0 } // placeholder so TS type works
+    delete row.__month
+    let other = 0
+    for (const [cat, val] of perMonth[ym]) {
+      if (topSet.has(cat)) row[cat] = Math.round(val * 100) / 100
+      else other += val
+    }
+    if (other > 0) row['Iné'] = Math.round(other * 100) / 100
+    return { month: ym, byCategory: row }
+  })
+
+  // Categories in the output (top + "Iné" if non-empty), in deterministic order
+  const hasOther = points.some((p) => (p.byCategory['Iné'] ?? 0) > 0)
+  const categories = hasOther && !topSet.has('Iné') ? [...topCats, 'Iné'] : topCats
+
+  return c.json({ ok: true, data: { months: useMonths, categories, points } })
 })
 
 app.get('/api/dashboard/trend', requireAuth, async (c) => {

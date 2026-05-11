@@ -45,7 +45,7 @@ export function Sidebar({ user, onLogout }: Props) {
           </h1>
         </div>
         <p className="font-body italic text-text-secondary text-sm mt-2 leading-snug">
-          Raul uprace tvojej financie. Lebo ty nevieš. Zadarmo.
+          Raul uprace tvoje financie. Lebo ty nevieš. Zadarmo.
         </p>
       </div>
 

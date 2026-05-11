@@ -328,6 +328,193 @@ const TONE_TEXT: Record<string, string> = {
   cobalt: 'text-cobalt-bright',
 }
 
+// ----------------------------------------------------------------
+// CategoryTrendChart — stacked bar chart of spending per category, per month.
+// Each month is one stacked column; segments are colored by category.
+// ----------------------------------------------------------------
+
+export interface CategoryTrendPoint {
+  month: string
+  byCategory: Record<string, number>
+}
+
+// Palette pulled from --color-* tokens. Order matters — most spent gets gold.
+// Slightly desaturated so 6+ stacks read clearly.
+const CATEGORY_COLORS = [
+  'var(--color-gold-bright)',
+  'var(--color-crimson-bright)',
+  'var(--color-cobalt-bright)',
+  'var(--color-emerald-bright)',
+  'var(--color-fire)',
+  'var(--color-magic)',
+  'var(--color-text-muted)', // for "Iné" / fallback
+]
+
+interface CategoryTrendChartProps {
+  data: CategoryTrendPoint[]
+  categories: string[]
+  height?: number
+  highlightMonth?: string
+}
+
+export function CategoryTrendChart({
+  data,
+  categories,
+  height = 260,
+  highlightMonth,
+}: CategoryTrendChartProps) {
+  if (data.length === 0 || categories.length === 0) {
+    return (
+      <p className="font-ui italic text-text-muted text-sm py-6 text-center">
+        Žiadne dáta v sledovanom období.
+      </p>
+    )
+  }
+
+  const W = 800
+  const H = height
+  const padL = 56
+  const padR = 16
+  const padT = 16
+  const padB = 36
+  const innerW = W - padL - padR
+  const innerH = H - padT - padB
+
+  // Total per month determines column height
+  const totals = data.map((d) => categories.reduce((s, c) => s + (d.byCategory[c] ?? 0), 0))
+  const maxTotal = Math.max(1, ...totals)
+  const niceMax = niceUp(maxTotal)
+  const groupW = innerW / data.length
+  const barW = Math.min(46, groupW - 8)
+
+  const yFor = (v: number) =>
+    padT + innerH - (Math.max(0, Math.min(niceMax, v)) / niceMax) * innerH
+  const ticks = [0, niceMax * 0.25, niceMax * 0.5, niceMax * 0.75, niceMax]
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="w-full h-auto"
+      preserveAspectRatio="none"
+      role="img"
+      aria-label="Výdavky podľa kategórií v čase"
+    >
+      {/* Grid + Y labels */}
+      {ticks.map((t, i) => (
+        <g key={i}>
+          <line
+            x1={padL}
+            x2={W - padR}
+            y1={yFor(t)}
+            y2={yFor(t)}
+            stroke="var(--color-border-dim)"
+            strokeWidth="1"
+            strokeDasharray={i === 0 ? '0' : '2 4'}
+          />
+          <text
+            x={padL - 8}
+            y={yFor(t) + 4}
+            fontSize="10"
+            textAnchor="end"
+            fill="var(--color-text-muted)"
+            fontFamily="var(--font-heading)"
+            letterSpacing="0.05em"
+          >
+            {eur0.format(t)}
+          </text>
+        </g>
+      ))}
+
+      {/* Stacked bars */}
+      {data.map((d, i) => {
+        const xCenter = padL + i * groupW + groupW / 2
+        const xLeft = xCenter - barW / 2
+        const isActive = highlightMonth === d.month
+        let yCursor = padT + innerH // start at the bottom
+        return (
+          <g key={d.month}>
+            {isActive && (
+              <rect
+                x={padL + i * groupW + 2}
+                y={padT}
+                width={groupW - 4}
+                height={innerH}
+                fill="var(--color-gold)"
+                opacity="0.06"
+                rx="2"
+              />
+            )}
+            {categories.map((cat, ci) => {
+              const v = d.byCategory[cat] ?? 0
+              if (v <= 0) return null
+              const h = (v / niceMax) * innerH
+              const y = yCursor - h
+              yCursor = y
+              const color = CATEGORY_COLORS[ci % CATEGORY_COLORS.length]
+              return (
+                <rect
+                  key={cat}
+                  x={xLeft}
+                  y={y}
+                  width={barW}
+                  height={h}
+                  fill={color}
+                  opacity="0.85"
+                  rx={ci === categories.length - 1 ? 2 : 0}
+                >
+                  <title>{`${cat}: ${eur0.format(v)} (${d.month})`}</title>
+                </rect>
+              )
+            })}
+            {/* Month label */}
+            <text
+              x={xCenter}
+              y={H - 18}
+              fontSize="11"
+              textAnchor="middle"
+              fill={isActive ? 'var(--color-gold-bright)' : 'var(--color-text-secondary)'}
+              fontFamily="var(--font-heading)"
+              letterSpacing="0.1em"
+            >
+              {shortMonth(d.month)}
+            </text>
+            <text
+              x={xCenter}
+              y={H - 4}
+              fontSize="9"
+              textAnchor="middle"
+              fill="var(--color-text-muted)"
+              fontFamily="var(--font-ui)"
+            >
+              {d.month.slice(2, 4)}
+            </text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+/** Legend chip used next to CategoryTrendChart. */
+export function CategoryLegend({ categories }: { categories: string[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6rem] uppercase tracking-widest font-heading">
+      {categories.map((cat, i) => (
+        <span key={cat} className="flex items-center gap-1.5">
+          <span
+            className="w-3 h-3 rounded-sm inline-block"
+            style={{
+              backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+              opacity: 0.85,
+            }}
+          />
+          <span className="text-text-secondary">{cat}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export function HorizontalBars({
   items,
   tone = 'gold',
