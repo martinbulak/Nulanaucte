@@ -7,6 +7,7 @@ import {
   getLatestRecommendation,
   listTransactions,
   listUncategorizedTransactions,
+  listUserCategories,
   saveRecommendation,
 } from '../db.js'
 import {
@@ -31,7 +32,26 @@ aiRoutes.use('*', aiLimit)
 // ---------- META ----------
 
 aiRoutes.get('/categories', async (c) => {
-  return c.json({ ok: true, data: { categories: CATEGORIES } })
+  const user = c.get('user')
+  const userCats = await listUserCategories(user.id)
+  const starter = [...CATEGORIES]
+  // Merge: user's own first (sorted by use frequency), then starter examples not yet listed
+  const seen = new Set<string>()
+  const merged: string[] = []
+  for (const c of [...userCats, ...starter]) {
+    const k = c.toLowerCase()
+    if (seen.has(k)) continue
+    seen.add(k)
+    merged.push(c)
+  }
+  return c.json({
+    ok: true,
+    data: {
+      categories: merged,
+      userCategories: userCats,
+      starter,
+    },
+  })
 })
 
 // ---------- CATEGORIZE ----------
@@ -84,9 +104,11 @@ aiRoutes.patch('/transactions/:id/category', async (c) => {
   } catch {
     return c.json({ ok: false, error: 'Neplatný JSON' }, 400)
   }
-  const cat = typeof body.category === 'string' ? body.category : ''
-  const valid = (CATEGORIES as readonly string[]).includes(cat)
-  if (!valid) return c.json({ ok: false, error: 'Neznáma kategória' }, 400)
+  const raw = typeof body.category === 'string' ? body.category.trim() : ''
+  if (!raw || raw.length < 2) return c.json({ ok: false, error: 'Kategória je príliš krátka' }, 400)
+  if (raw.length > 60) return c.json({ ok: false, error: 'Kategória môže mať max 60 znakov' }, 400)
+  // Normalize: collapse whitespace, capitalize first
+  const cat = (raw.replace(/\s+/g, ' ')).replace(/^./, (c) => c.toUpperCase())
   const updated = await applyCategoryUpdates(user.id, [
     { id, category: cat as Category, aiConfidence: null, source: 'user' },
   ])

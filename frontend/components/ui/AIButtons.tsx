@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { apiFetch } from '../../utils/api'
 
 const PRIMARY =
@@ -164,15 +164,24 @@ export function RaulPanel({ month }: { month: string }) {
   const [usedAI, setUsedAI] = useState<boolean | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [err, setErr] = useState<string | null>(null)
-  const [loaded, setLoaded] = useState(false)
 
-  async function load() {
+  // Load existing recommendation whenever the month prop changes
+  // (fixes blank-screen bug from calling load() during render).
+  useEffect(() => {
+    let alive = true
     setPhase('loading')
-    const res = await apiFetch<RaulData>(`/api/ai/recommendations?month=${encodeURIComponent(month)}`)
-    setPhase('idle')
-    setLoaded(true)
-    if (res.ok) setData(res.data)
-  }
+    setData(null)
+    setUsedAI(null)
+    setErr(null)
+    apiFetch<RaulData>(`/api/ai/recommendations?month=${encodeURIComponent(month)}`).then((res) => {
+      if (!alive) return
+      setPhase('idle')
+      if (res.ok) setData(res.data)
+    })
+    return () => {
+      alive = false
+    }
+  }, [month])
 
   async function generate() {
     setErr(null)
@@ -201,10 +210,6 @@ export function RaulPanel({ month }: { month: string }) {
     })
     setUsedAI(res.data.usedAI)
     setPhase('done')
-  }
-
-  if (!loaded && phase === 'loading') {
-    load()
   }
 
   const busy = phase === 'analyzing' || phase === 'writing'

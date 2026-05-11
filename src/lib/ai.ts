@@ -10,7 +10,10 @@ function getClient(): OpenAI | null {
 
 const MODEL = 'gpt-4o-mini' // cheap + fast, good enough for this domain
 
-// Canonical category list (must match UI / dashboard).
+// Starter category set — used as PROMPT EXAMPLES (not a strict whitelist).
+// AI is free to invent new labels for transactions that don't fit these neatly,
+// e.g. "Káva", "Auto-servis", "Lieky", "Streaming". Users can also rename
+// categories manually in the UI (combobox accepts any label up to 60 chars).
 export const CATEGORIES = [
   'Potraviny',
   'Reštaurácie a kaviarne',
@@ -30,7 +33,10 @@ export const CATEGORIES = [
   'Poistenie',
   'Iné',
 ] as const
-export type Category = (typeof CATEGORIES)[number]
+/** Category is now any short Slovak string up to 60 chars. */
+export type Category = string
+
+const CATEGORY_MAX_LEN = 60
 
 // ---------------- CATEGORIZATION ----------------
 
@@ -79,32 +85,35 @@ function ruleBased(tx: TxToCategorize): CategorizedTx {
   return { id: tx.id, category: 'Iné', confidence: 0.3 }
 }
 
-const SYSTEM_PROMPT = `Si finančný asistent appky "Nula na účte". Tvoja jediná úloha: priradiť každej transakcii kategóriu z predpísaného zoznamu.
+const SYSTEM_PROMPT = `Si finančný asistent appky "Nula na účte". Tvoja jediná úloha: pri každej transakcii navrhnúť stručný slovenský label kategórie podľa toho čo v popise skutočne vidíš.
 
 Pravidlá:
 - Vráť LEN platný JSON: {"items":[{"id":1,"category":"Potraviny","confidence":0.95}, ...]}
-- "category" musí byť presne jedna z hodnôt zo zoznamu nižšie. Ak si si nie istý → "Iné" s confidence pod 0.5.
-- "confidence" je číslo 0..1.
-- Ignoruj ID, ktoré nedostaneš.
-- Žiadny iný text, žiadne markdown, žiadne komentáre.
+- "category" = 1–3 slová po slovensky, prvé písmeno veľké (napr. "Potraviny", "Káva", "Auto-servis", "Streaming", "Mzda", "Bankomat"). Max 50 znakov.
+- "confidence" = číslo 0..1.
+- Buď KONZISTENTNÝ: rovnaký obchod / podobné transakcie → rovnaký label v celej dávke.
+- Ak si si naozaj nie istý → "Iné" s confidence pod 0.4.
+- Ignoruj ID ktoré nemáš v inpute.
+- Žiadny iný text mimo JSON, žiadny markdown, žiadne komentáre.
 
-Slovenské heuristiky:
-- Tesco/Lidl/Kaufland/Billa/COOP → Potraviny
-- McDonald/KFC/pizza/Wolt/bistro/kaviareň → Reštaurácie a kaviarne
-- Slovnaft/OMV/Shell → Tankovanie
-- Bolt/Uber/MHD/ZSSK → Auto a doprava
-- O2/Orange/Telekom/4ka → Telekomunikácie
+Príklady labelov (môžeš použiť aj vlastné podobné):
+Potraviny, Reštaurácie, Káva, Tankovanie, Auto, MHD/Taxi, Mobil/Internet, Energie, Voda, Lieky, Lekár, Drogéria, Oblečenie, Zábava, Streaming, Hra/Aplikácia, Knihy, Šport, Cestovanie, Hotel, Letenka, Parkovanie, Dovolenka, Wellness, Bývanie/Nájom, Poistenie, Splátka úveru, Hypotéka, Mzda, Bonus, Dividenda, Refundácia, Bankomat, Prevod, Poplatok, Sporenie, Investícia, Charita, Darček, Vzdelávanie, Domov, Záhrada, Iné.
+
+Heuristiky:
+- Tesco/Lidl/Kaufland/Billa/COOP/Terno → Potraviny
+- McDonald/KFC/Wolt/Bolt Food/pizza/bistro → Reštaurácie (alebo špecifickejšie ak vieš: "Pizza", "Sushi")
+- Starbucks/kaviareň/cafe → Káva
+- Slovnaft/OMV/Shell/Orlen → Tankovanie
+- Bolt/Uber/taxi → MHD/Taxi
+- O2/Orange/Telekom/4ka → Mobil/Internet
 - SSE/SPP/VSE/ZSE → Energie
-- Lekáreň/Dr. Max → Zdravie
-- Netflix/Spotify/Google/Apple/Adobe → Predplatné
-- Mzda/výplata/dividenda → Príjem (typ je už označený)
-- Výber/bankomat → Výber z bankomatu
-- Splátka/úver/hypotéka → Splátky a úvery
-- Allianz/Generali/Kooperativa → Poistenie
-- Bytový dom/správca/nájom → Bývanie
-
-Zoznam kategórií:
-${CATEGORIES.join('\n')}`
+- Dr.Max/Lekáreň → Lieky
+- Netflix/Spotify/HBO/Apple Music → Streaming
+- Adobe/GitHub/Figma/Notion/ChatGPT → Aplikácia
+- Mzda/výplata → Mzda; Dividenda → Dividenda
+- Výber/bankomat/ATM → Bankomat
+- Splátka hypotéky → Hypotéka; iný úver → Splátka úveru
+- Allianz/Generali/Kooperativa → Poistenie`
 
 // Tunable — gpt-4o-mini handles 25 items per call comfortably in ~2-3s.
 // 6 batches × 25 = 150 transactions in ~4-6s wall-clock when parallelized.
@@ -140,12 +149,16 @@ async function aiCategorizeOne(
   const parsed = JSON.parse(raw) as { items?: Array<{ id?: number; category?: string; confidence?: number }> }
   const items: CategorizedTx[] = []
   if (Array.isArray(parsed.items)) {
-    const validSet = new Set<string>(CATEGORIES)
     for (const it of parsed.items) {
       if (typeof it.id !== 'number') continue
-      if (typeof it.category !== 'string' || !validSet.has(it.category)) continue
+      if (typeof it.category !== 'string') continue
+      // Sanity-check the label: trim, cap length, reject empties / weird stuff
+      const cat = it.category.trim().replace(/\s+/g, ' ').slice(0, CATEGORY_MAX_LEN)
+      if (!cat || cat.length < 2) continue
+      // Capitalize first letter for consistency
+      const normalized = cat.charAt(0).toUpperCase() + cat.slice(1)
       const conf = typeof it.confidence === 'number' ? Math.max(0, Math.min(1, it.confidence)) : 0.5
-      items.push({ id: it.id, category: it.category as Category, confidence: conf })
+      items.push({ id: it.id, category: normalized, confidence: conf })
     }
   }
   return { items, tokens: res.usage?.total_tokens ?? 0 }

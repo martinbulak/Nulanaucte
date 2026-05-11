@@ -372,6 +372,22 @@ export async function applyCategoryUpdates(
   return count
 }
 
+/** All distinct categories used by this user, sorted by most-frequent. */
+export async function listUserCategories(userId: number): Promise<string[]> {
+  const rows = await db
+    .select({
+      category: transactions.category,
+      cnt: sqlOp<number>`count(*)::int`,
+    })
+    .from(transactions)
+    .where(eq(transactions.userId, userId))
+    .groupBy(transactions.category)
+  return rows
+    .filter((r) => r.category && r.category !== 'Nezaradené')
+    .sort((a, b) => Number(b.cnt) - Number(a.cnt))
+    .map((r) => r.category)
+}
+
 /** Aggregated category totals for a month (used by Raul + dashboard). */
 export async function categorySummary(
   userId: number,

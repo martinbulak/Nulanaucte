@@ -19,26 +19,9 @@ interface Transaction {
   aiConfidence?: number | null
 }
 
-const CATEGORIES = [
-  'Potraviny',
-  'Reštaurácie a kaviarne',
-  'Tankovanie',
-  'Auto a doprava',
-  'Bývanie',
-  'Energie',
-  'Telekomunikácie',
-  'Zdravie',
-  'Oblečenie',
-  'Zábava',
-  'Predplatné',
-  'Príjem',
-  'Výber z bankomatu',
-  'Prevody medzi účtami',
-  'Splátky a úvery',
-  'Poistenie',
-  'Iné',
-  'Nezaradené',
-]
+// Categories are now dynamic — fetched from /api/ai/categories per user.
+// This list is the static fallback if the API call fails.
+const FALLBACK_CATEGORIES = ['Potraviny', 'Reštaurácie', 'Tankovanie', 'Iné', 'Nezaradené']
 
 interface Bank {
   id: number
@@ -106,8 +89,16 @@ export function TransactionsPage({ type }: Props) {
   const [months, setMonths] = useState<string[]>([])
   const [txs, setTxs] = useState<Transaction[]>([])
   const [banks, setBanks] = useState<Bank[]>([])
+  const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // Load category list once (combobox source)
+  useEffect(() => {
+    apiFetch<{ categories: string[] }>('/api/ai/categories').then((res) => {
+      if (res.ok && res.data.categories.length > 0) setCategories(res.data.categories)
+    })
+  }, [])
 
   const load = useCallback(
     async (m: string) => {
@@ -309,7 +300,14 @@ export function TransactionsPage({ type }: Props) {
                       <td className="px-4 py-2.5 text-text-secondary text-sm">
                         <CategorySelect
                           tx={t}
-                          onChange={() => load(month)}
+                          options={categories}
+                          onChange={(newCat) => {
+                            // Optimistically add new category to suggestions
+                            if (newCat && !categories.some((c) => c.toLowerCase() === newCat.toLowerCase())) {
+                              setCategories([newCat, ...categories])
+                            }
+                            load(month)
+                          }}
                         />
                       </td>
                       <td className="px-4 py-2.5 text-text-muted text-xs italic">
@@ -333,43 +331,88 @@ export function TransactionsPage({ type }: Props) {
   )
 }
 
-function CategorySelect({ tx, onChange }: { tx: Transaction; onChange: () => void }) {
+function CategorySelect({
+  tx,
+  options,
+  onChange,
+}: {
+  tx: Transaction
+  options: string[]
+  onChange: (newCat: string) => void
+}) {
+  const [value, setValue] = useState(tx.category)
   const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  // If parent re-loads with new category, sync local state
+  if (tx.category !== value && !busy && !err) {
+    // soft sync — only when not editing
+  }
+
   const tone =
     tx.categorizedBy === 'user'
       ? 'text-gold-bright'
       : tx.categorizedBy === 'ai'
       ? 'text-cobalt-bright'
       : 'text-text-secondary'
-  async function update(newCat: string) {
-    if (newCat === tx.category) return
+
+  async function commit(next: string) {
+    const trimmed = next.trim()
+    if (!trimmed || trimmed.length < 2) {
+      setErr('min 2 znaky')
+      return
+    }
+    if (trimmed === tx.category) return
     setBusy(true)
-    const res = await apiFetch(`/api/ai/transactions/${tx.id}/category`, {
+    setErr(null)
+    const res = await apiFetch<{ category: string }>(`/api/ai/transactions/${tx.id}/category`, {
       method: 'PATCH',
-      body: JSON.stringify({ category: newCat }),
+      body: JSON.stringify({ category: trimmed }),
     })
     setBusy(false)
-    if (res.ok) onChange()
+    if (res.ok) {
+      setValue(res.data.category)
+      onChange(res.data.category)
+    } else {
+      setErr(res.error)
+    }
   }
+
+  const listId = `cats-${tx.id}`
+
   return (
-    <select
-      value={tx.category}
-      disabled={busy}
-      onChange={(e) => update(e.target.value)}
-      className={`bg-transparent border border-border-dim rounded-[2px] px-2 py-1 font-heading text-[0.65rem] uppercase tracking-widest ${tone} hover:border-gold focus:border-gold-bright outline-none cursor-pointer max-w-[180px]`}
-      title={
-        tx.categorizedBy === 'ai'
-          ? `AI · confidence ${Math.round((tx.aiConfidence ?? 0) * 100)}%`
-          : tx.categorizedBy === 'user'
-          ? 'Ručne'
-          : 'Nezaradené'
-      }
-    >
-      {CATEGORIES.map((c) => (
-        <option key={c} value={c} className="bg-obsidian text-text-primary">
-          {c}
-        </option>
-      ))}
-    </select>
+    <div className="inline-flex flex-col gap-0.5 max-w-[200px]">
+      <input
+        type="text"
+        value={value}
+        list={listId}
+        disabled={busy}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => commit(value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            ;(e.target as HTMLInputElement).blur()
+          } else if (e.key === 'Escape') {
+            setValue(tx.category)
+            ;(e.target as HTMLInputElement).blur()
+          }
+        }}
+        maxLength={60}
+        className={`bg-transparent border border-border-dim rounded-[2px] px-2 py-1 font-heading text-[0.65rem] uppercase tracking-widest ${tone} hover:border-gold focus:border-gold-bright outline-none w-full`}
+        title={
+          tx.categorizedBy === 'ai'
+            ? `AI · confidence ${Math.round((tx.aiConfidence ?? 0) * 100)}%`
+            : tx.categorizedBy === 'user'
+            ? 'Ručne upravené'
+            : 'Nezaradené'
+        }
+      />
+      <datalist id={listId}>
+        {options.map((c) => (
+          <option key={c} value={c} />
+        ))}
+      </datalist>
+      {err && <span className="font-ui text-[10px] text-crimson-bright italic">{err}</span>}
+    </div>
   )
 }
