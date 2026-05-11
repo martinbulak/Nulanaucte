@@ -330,6 +330,9 @@ export function Dashboard() {
                       Popis
                     </th>
                     <th className="font-heading text-[0.6rem] uppercase tracking-widest text-text-muted px-4 py-2.5 text-left font-normal">
+                      Kategória
+                    </th>
+                    <th className="font-heading text-[0.6rem] uppercase tracking-widest text-text-muted px-4 py-2.5 text-left font-normal">
                       Banka
                     </th>
                     <th className="font-heading text-[0.6rem] uppercase tracking-widest text-text-muted px-4 py-2.5 text-right font-normal">
@@ -345,6 +348,18 @@ export function Dashboard() {
                       </td>
                       <td className="px-4 py-2.5 text-text-primary text-sm truncate max-w-md">
                         {t.note || '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs whitespace-nowrap">
+                        <span
+                          className={[
+                            'font-heading uppercase tracking-widest border px-2 py-0.5 rounded-[2px]',
+                            t.category === 'Nezaradené' || t.category === 'Iné'
+                              ? 'text-text-muted border-border-dim bg-stone/40'
+                              : 'text-gold border-gold/30 bg-gold/10',
+                          ].join(' ')}
+                        >
+                          {t.category}
+                        </span>
                       </td>
                       <td className="px-4 py-2.5 text-text-muted text-xs italic">
                         {t.bankName || '—'}

@@ -3,13 +3,18 @@ import { requireAuth } from '../middleware/auth.js'
 import { rateLimit } from '../middleware/rateLimit.js'
 import {
   applyCategoryUpdates,
+  applyRulesToTransactions,
   categorySummary,
+  findTransactionById,
   getLatestRecommendation,
+  listMerchantRules,
   listReanalyzableTransactions,
   listTransactions,
   listUncategorizedTransactions,
   listUserCategories,
+  merchantKey,
   saveRecommendation,
+  upsertMerchantRule,
 } from '../db.js'
 import {
   CATEGORIES,
@@ -81,6 +86,7 @@ aiRoutes.post('/categorize', async (c) => {
         processed: 0,
         updated: 0,
         usedAI: false,
+        ruleHits: 0,
         mode: force ? 'force' : 'uncategorized',
         note: force
           ? 'Žiadne transakcie na pretriedenie (všetky sú ručne upravené alebo neexistujú).'
@@ -88,28 +94,63 @@ aiRoutes.post('/categorize', async (c) => {
       },
     })
   }
-  const minimal = txs.map((t) => ({
-    id: t.id,
-    date: t.date,
-    note: t.note ?? '',
-    amount: t.type === 'vydavok' ? -t.amount : t.amount,
-    type: t.type,
-  }))
-  const result = await categorizeBatch(minimal)
-  const updates = result.items.map((it) => ({
-    id: it.id,
-    category: it.category,
-    aiConfidence: it.confidence,
-    source: 'ai' as const,
-  }))
-  const updated = await applyCategoryUpdates(user.id, updates)
+
+  // STEP 1 — Apply learned merchant rules (IBAN / merchant identifier match).
+  // Anything that hits a rule gets categorized for free, no AI tokens spent.
+  const rules = await listMerchantRules(user.id)
+  const ruleHitIds = await applyRulesToTransactions(user.id, txs, rules)
+  const remaining = txs.filter((t) => !ruleHitIds.has(t.id))
+
+  // STEP 2 — Anything still uncategorized goes through AI.
+  let usedAI = false
+  let tokens = 0
+  let aiUpdated = 0
+  if (remaining.length > 0) {
+    const minimal = remaining.map((t) => ({
+      id: t.id,
+      date: t.date,
+      note: t.note ?? '',
+      amount: t.type === 'vydavok' ? -t.amount : t.amount,
+      type: t.type,
+    }))
+    const result = await categorizeBatch(minimal)
+    usedAI = result.usedAI
+    tokens = result.tokens ?? 0
+    const updates = result.items.map((it) => ({
+      id: it.id,
+      category: it.category,
+      aiConfidence: it.confidence,
+      source: 'ai' as const,
+    }))
+    aiUpdated = await applyCategoryUpdates(user.id, updates)
+    // STEP 3 — Persist high-confidence AI categorizations as rules so future
+    // transactions from the same merchant skip AI on next run. Only confident
+    // ones (≥0.7) and skip "Iné" — we don't want to memoize a fallback.
+    for (const it of result.items) {
+      if ((it.confidence ?? 0) < 0.7) continue
+      if (it.category.toLowerCase() === 'iné') continue
+      const sourceTx = remaining.find((t) => t.id === it.id)
+      if (!sourceTx) continue
+      const k = merchantKey(sourceTx.note)
+      if (!k) continue
+      await upsertMerchantRule({
+        userId: user.id,
+        key: k,
+        category: it.category,
+        confidence: it.confidence,
+        source: 'ai',
+      })
+    }
+  }
+
   return c.json({
     ok: true,
     data: {
       processed: txs.length,
-      updated,
-      usedAI: result.usedAI,
-      tokens: result.tokens,
+      updated: ruleHitIds.size + aiUpdated,
+      ruleHits: ruleHitIds.size,
+      usedAI,
+      tokens,
       mode: force ? 'force' : 'uncategorized',
     },
   })
@@ -136,6 +177,26 @@ aiRoutes.patch('/transactions/:id/category', async (c) => {
     { id, category: cat as Category, aiConfidence: null, source: 'user' },
   ])
   if (updated === 0) return c.json({ ok: false, error: 'Transakcia nenájdená' }, 404)
+
+  // Memorize the user's choice as a merchant rule so future imports from the
+  // same merchant/IBAN are categorized automatically before AI even sees them.
+  try {
+    const tx = await findTransactionById(user.id, id)
+    const k = merchantKey(tx?.note)
+    if (k) {
+      await upsertMerchantRule({
+        userId: user.id,
+        key: k,
+        category: cat,
+        confidence: null,
+        source: 'user',
+      })
+    }
+  } catch (e) {
+    // Non-fatal — the user override was already saved; rule is "nice to have".
+    console.warn('[ai] failed to upsert merchant rule:', e instanceof Error ? e.message : e)
+  }
+
   return c.json({ ok: true, data: { id, category: cat } })
 })
 
@@ -211,8 +272,15 @@ aiRoutes.post('/recommendations', async (c) => {
     .filter((t) => t.type === 'vydavok')
     .reduce((s, t) => s + t.amount, 0)
 
-  const prevMap = new Map(byCategoryPrev.map((c) => [c.category, c.total]))
-  const changeVsLast = byCategory
+  // Filter out "Iné" everywhere we feed Raul — it's an uninformative bucket
+  // ("dunno, miscellany") and recommendations about it are useless to the user.
+  const isOther = (cat: string) => cat.trim().toLowerCase() === 'iné'
+
+  const byCategoryFiltered = byCategory.filter((c) => !isOther(c.category))
+  const byCategoryPrevFiltered = byCategoryPrev.filter((c) => !isOther(c.category))
+
+  const prevMap = new Map(byCategoryPrevFiltered.map((c) => [c.category, c.total]))
+  const changeVsLast = byCategoryFiltered
     .map((c) => {
       const prev = prevMap.get(c.category) ?? 0
       const delta = c.total - prev
@@ -224,7 +292,7 @@ aiRoutes.post('/recommendations', async (c) => {
     .slice(0, 4)
 
   const largestTransactions = monthTxs
-    .filter((t) => t.type === 'vydavok')
+    .filter((t) => t.type === 'vydavok' && !isOther(t.category))
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 4)
     .map((t) => ({
@@ -238,7 +306,7 @@ aiRoutes.post('/recommendations', async (c) => {
     monthLabel: monthLabel(month),
     totalIncome,
     totalExpense,
-    topCategories: byCategory.slice(0, 5),
+    topCategories: byCategoryFiltered.slice(0, 5),
     changeVsLast,
     largestTransactions,
   })

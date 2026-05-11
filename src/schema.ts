@@ -119,6 +119,33 @@ export const transactions = pgTable(
   }),
 )
 
+// Per-user lookup rules: "if a future transaction's normalized merchant-key
+// matches one I've already categorized, auto-apply that category before AI
+// even sees the transaction". Key is derived from the note (IBAN if present,
+// otherwise a normalized merchant identifier) via merchantKey() in ai.ts.
+//
+// Rules are created automatically when the user manually overrides a category
+// (and optionally when AI returns a high-confidence categorization).
+export const merchantRules = pgTable(
+  'merchant_rules',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    category: text('category').notNull(),
+    confidence: doublePrecision('confidence'),
+    source: text('source').notNull().default('user'), // 'user' | 'ai'
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userKeyUq: uniqueIndex('merchant_rules_user_key_uq').on(t.userId, t.key),
+    userIdx: index('merchant_rules_user_idx').on(t.userId),
+  }),
+)
+
 // Stores AI-generated periodic recommendations (Raul) so we don't burn tokens on every dashboard load.
 export const recommendations = pgTable(
   'recommendations',

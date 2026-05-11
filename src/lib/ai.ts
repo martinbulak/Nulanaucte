@@ -69,6 +69,8 @@ function ruleBased(tx: TxToCategorize): CategorizedTx {
     [/(carwash|car.?wash|autoumyvar|autoumýv|umyvar|umýv|myčka|myjka|wash\b)/i, 'Auto', 0.92],
     [/(stk\b|emisn|pneuservis|pneumatik|autoservis|autodiel|auto[- ]?salón|servis vozid)/i, 'Auto', 0.9],
     [/(parkov|parking|parkomat|easypark|spark\b)/i, 'Parkovanie', 0.92],
+    // Airport-as-merchant (BTS.AERO, KSC.AERO, ".aero" domain, AIRPORT in name)
+    [/(bts\.aero|ksc\.aero|prg\.aero|vie\.aero|\.aero\b|airport)/i, 'Parkovanie', 0.78],
     [/(diaľničná známka|eds\b|emýto|mýto|emyto)/i, 'Auto', 0.9],
     [/(tesla supercharger|ionity|nabíjacie|nabíjacia stanica)/i, 'Auto', 0.88],
     [/(bolt\b|uber|hopin|taxi|liftago)/i, 'MHD a Taxi', 0.9],
@@ -204,7 +206,28 @@ OSTATNÉ:
 KEĎ NEVIEŠ NA 100 %, ALE TUŠÍŠ:
 - Stále urči konkrétnu kategóriu s nižšou confidence (0.4–0.6), NIE "Iné".
 - Príklad: "Platba kartou — INTERSPORT BRATISLAVA 45 EUR" → Šport (conf 0.7), nie "Iné".
-- Príklad: "Platba — CARWASH PETRZALKA 6 EUR" → Auto (conf 0.95), nie "Iné".`
+- Príklad: "Platba — CARWASH PETRZALKA 6 EUR" → Auto (conf 0.95), nie "Iné".
+
+KÓDY A SKRATKY — vždy ich dekóduj, nehoď ich do "Iné":
+- **IATA letiskové kódy 3 písmen** (BTS, KSC, PRG, VIE, BUD, MUC, FRA, LHR, CDG, JFK...) → ide o letisko. Ak je v note "BTS.AERO" alebo "BTS PARKING" alebo "Bratislava Airport" → **Parkovanie** alebo **Letenka** podľa kontextu (parking/aero/garage → Parkovanie, ticket/airline → Letenka).
+- **ICAO kódy 4 písmen** (LZIB, EDDF...) → letisko, viď vyššie.
+- **Stanice / autobusové firmy** (RegioJet, Leo Express, Flixbus, SAD Bratislava, RegioBus, GVD) → MHD a Taxi alebo Cestovanie.
+- **Mýto a diaľničné** (eMÝTO, eDS, MYTO CZ, ASFINAG, Toll Collect, Verkehrsbüro) → Auto.
+- **Doménové sufixy ako ".sk", ".cz", ".com", ".aero"** ti môžu napovedať odvetvie (.aero = letectvo).
+- **Reťazce s podstatným menom v názve** (napr. "PARKING", "GARAGE", "STATION", "AIRPORT", "HOTEL", "GAS", "PHARMACY", "RESTAURANT") sú silné indikátory — riaď sa nimi.
+- **Geografické skratky** (BA, BTS, KE, PO, ZA...) sú slovenské mestá, sami o sebe ti netreba, ale spolu so slovom (napr. "BA PARKING") to dáva istotu.
+- Príklad: "BTS.AERO" → Parkovanie (parkovanie na letisku BTS = Bratislava); conf 0.85.
+- Príklad: "Platba kartou KSC AIRPORT" → Parkovanie alebo Letenka (podľa sumy: malá = parking, veľká = letenka); conf 0.7.
+- Príklad: "ASFINAG SERVICE" → Auto (mýto v Rakúsku); conf 0.9.
+
+KONTEXT POMÁHA — pozri si sumu:
+- < 5 € → typicky parkovanie, káva, MHD lístok, drobnosť.
+- 5–25 € → reštaurácia, drogéria, kniha.
+- 25–100 € → potraviny týždeň, oblečenie, lieky.
+- 100–500 € → nákup väčší (elektronika, mesačné potraviny), tankovanie pre veľké auto.
+- > 500 € → veľký nákup, hypotéka, letenka, dovolenka.
+
+Nie je to pravidlo, ale signál ktorý môžeš použiť keď text v note je nejasný.`
 
 // Tunable — gpt-4o-mini handles 25 items per call comfortably in ~2-3s.
 // 6 batches × 25 = 150 transactions in ~4-6s wall-clock when parallelized.

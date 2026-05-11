@@ -8,6 +8,7 @@ import {
   incomes,
   userTokens,
   recommendations,
+  merchantRules,
 } from './schema.js'
 import { hashPassword } from './lib/password.js'
 import type {
@@ -33,6 +34,31 @@ const DEFAULT_BANKS: Array<{ name: string; type: string; source: BankSource }> =
 
 export async function ensureSeeded(): Promise<void> {
   if (seedingDone) return
+
+  // Lightweight in-app migration: create tables added after the initial
+  // `drizzle-kit push`. Each statement is idempotent (IF NOT EXISTS) so
+  // running it on every cold start is cheap (one round-trip).
+  await db.execute(sqlOp`
+    CREATE TABLE IF NOT EXISTS merchant_rules (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      category TEXT NOT NULL,
+      confidence DOUBLE PRECISION,
+      source TEXT NOT NULL DEFAULT 'user',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sqlOp`
+    CREATE UNIQUE INDEX IF NOT EXISTS merchant_rules_user_key_uq
+      ON merchant_rules(user_id, key)
+  `)
+  await db.execute(sqlOp`
+    CREATE INDEX IF NOT EXISTS merchant_rules_user_idx
+      ON merchant_rules(user_id)
+  `)
+
   // Check whether the seed user already exists (case-insensitive)
   const existing = await findUserByEmail('koduvanica')
   if (existing) {
@@ -222,6 +248,18 @@ export async function createBank(input: {
 
 // ---------------- TRANSACTIONS ----------------
 
+export async function findTransactionById(
+  userId: number,
+  id: number,
+): Promise<Transaction | null> {
+  const [r] = await db
+    .select()
+    .from(transactions)
+    .where(and(eq(transactions.userId, userId), eq(transactions.id, id)))
+    .limit(1)
+  return r ? rowToTransaction(r) : null
+}
+
 function rowToTransaction(r: typeof transactions.$inferSelect): Transaction {
   return {
     id: r.id,
@@ -393,6 +431,150 @@ export async function applyCategoryUpdates(
     count += r.length
   }
   return count
+}
+
+// ---------------- MERCHANT RULES ----------------
+//
+// A merchant rule maps a normalized lookup key (derived from a transaction's
+// note — IBAN if present, otherwise a stripped/lowercased merchant identifier)
+// to a category. We consult these rules BEFORE invoking AI; rules created by
+// "user" overrides win over rules created by "ai" with the same key.
+
+/**
+ * Build the lookup key for a transaction note. Logic:
+ *  1. If the note contains a SK/CZ IBAN, use that (most specific identifier).
+ *  2. Otherwise normalize the note: lowercase, strip card-payment prefixes,
+ *     collapse whitespace, drop dates/amounts/refs, and keep the leading
+ *     merchant/identifier portion.
+ *
+ * The output is always lowercase and trimmed; keys longer than 80 chars are
+ * truncated so a long memo doesn't bloat the index.
+ */
+export function merchantKey(note: string | null | undefined): string {
+  if (!note) return ''
+  const ibanMatch = note.match(/\b([A-Z]{2}\d{2}[A-Z0-9]{12,30})\b/i)
+  if (ibanMatch) return `iban:${ibanMatch[1].toUpperCase()}`
+  let s = note.toLowerCase()
+  // Strip noise that varies per transaction (dates, times, ref numbers).
+  s = s.replace(/\b\d{2}[./-]\d{2}([./-]\d{2,4})?\b/g, ' ') // dates
+  s = s.replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, ' ') // times
+  s = s.replace(/\b(ref|vs|ks|ss|var\.?symbol)[:.]? ?\d+/gi, ' ') // ref numbers
+  s = s.replace(/\b\d+[.,]\d{2} ?(eur|€|czk|usd)?\b/gi, ' ') // amounts
+  s = s.replace(/\b(platba kartou|platba|prevod z|prevod na|úhrada|prijatá platba|odchádzajúca platba|standing order|trvalý príkaz|inkaso)\b/gi, ' ')
+  s = s.replace(/[\s ]+/g, ' ').trim()
+  // Take the first 60 chars of the cleaned string as identifier.
+  if (s.length > 60) s = s.slice(0, 60).trim()
+  return s
+}
+
+export interface MerchantRule {
+  id: number
+  userId: number
+  key: string
+  category: string
+  confidence: number | null
+  source: 'user' | 'ai'
+  createdAt: string
+  updatedAt: string
+}
+
+function rowToRule(r: typeof merchantRules.$inferSelect): MerchantRule {
+  return {
+    id: r.id,
+    userId: r.userId,
+    key: r.key,
+    category: r.category,
+    confidence: r.confidence,
+    source: r.source as 'user' | 'ai',
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  }
+}
+
+/** All merchant rules for a user, keyed for fast Map<key, rule> lookup. */
+export async function listMerchantRules(userId: number): Promise<MerchantRule[]> {
+  const rows = await db
+    .select()
+    .from(merchantRules)
+    .where(eq(merchantRules.userId, userId))
+  return rows.map(rowToRule)
+}
+
+/**
+ * Upsert a rule. User-sourced rules win — if an AI-sourced rule exists for the
+ * same (userId, key) and we're trying to write a user one, we overwrite.
+ * If a user-sourced rule exists and we'd write an AI one, we skip.
+ */
+export async function upsertMerchantRule(input: {
+  userId: number
+  key: string
+  category: string
+  confidence?: number | null
+  source: 'user' | 'ai'
+}): Promise<void> {
+  if (!input.key) return
+  if (input.source === 'ai') {
+    // Don't trample user-set rules with AI guesses
+    const [existing] = await db
+      .select()
+      .from(merchantRules)
+      .where(
+        and(eq(merchantRules.userId, input.userId), eq(merchantRules.key, input.key)),
+      )
+      .limit(1)
+    if (existing && existing.source === 'user') return
+  }
+  await db
+    .insert(merchantRules)
+    .values({
+      userId: input.userId,
+      key: input.key,
+      category: input.category,
+      confidence: input.confidence ?? null,
+      source: input.source,
+    })
+    .onConflictDoUpdate({
+      target: [merchantRules.userId, merchantRules.key],
+      set: {
+        category: input.category,
+        confidence: input.confidence ?? null,
+        source: input.source,
+        updatedAt: sqlOp`NOW()`,
+      },
+    })
+}
+
+/**
+ * Bulk-apply rules to a set of transactions. For each tx whose merchantKey()
+ * matches a known rule, update its category directly and return the matched
+ * ids so the caller can skip those txs in the AI batch.
+ */
+export async function applyRulesToTransactions(
+  userId: number,
+  txs: Transaction[],
+  rules: MerchantRule[],
+): Promise<Set<number>> {
+  if (rules.length === 0 || txs.length === 0) return new Set()
+  const ruleMap = new Map(rules.map((r) => [r.key, r]))
+  const updates: Array<{ id: number; category: string; confidence: number | null }> = []
+  for (const t of txs) {
+    const k = merchantKey(t.note)
+    if (!k) continue
+    const rule = ruleMap.get(k)
+    if (rule) updates.push({ id: t.id, category: rule.category, confidence: rule.confidence })
+  }
+  if (updates.length === 0) return new Set()
+  for (const u of updates) {
+    await db
+      .update(transactions)
+      .set({
+        category: u.category.slice(0, 80),
+        aiConfidence: u.confidence,
+        categorizedBy: 'ai', // rule-based counts as automated
+      })
+      .where(and(eq(transactions.userId, userId), eq(transactions.id, u.id)))
+  }
+  return new Set(updates.map((u) => u.id))
 }
 
 /** All distinct categories used by this user, sorted by most-frequent. */
