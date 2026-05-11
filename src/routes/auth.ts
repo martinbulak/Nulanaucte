@@ -184,7 +184,8 @@ authRoutes.post('/register', registerIpLimit, async (c) => {
       const { token } = await issueUserToken(existing.id, 'verify-email')
       const verifyUrl = `${env.PUBLIC_ORIGIN}/verify?token=${encodeURIComponent(token)}`
       const tpl = verifyEmailTemplate(verifyUrl, existing.name)
-      await sendEmail({ to: existing.email, ...tpl, tag: 'verify-email' })
+      const r = await sendEmail({ to: existing.email, ...tpl, tag: 'verify-email' })
+      if (!r.ok) console.error('[auth/register] verify resend failed:', r.error)
     }
     return c.json({ ok: true, data: { sent: true } })
   }
@@ -200,7 +201,8 @@ authRoutes.post('/register', registerIpLimit, async (c) => {
   const { token } = await issueUserToken(user.id, 'verify-email')
   const verifyUrl = `${env.PUBLIC_ORIGIN}/verify?token=${encodeURIComponent(token)}`
   const tpl = verifyEmailTemplate(verifyUrl, name)
-  await sendEmail({ to: email, ...tpl, tag: 'verify-email' })
+  const r = await sendEmail({ to: email, ...tpl, tag: 'verify-email' })
+  if (!r.ok) console.error('[auth/register] verify send failed:', r.error)
 
   return c.json({ ok: true, data: { sent: true } })
 })
@@ -247,7 +249,8 @@ authRoutes.post('/forgot', forgotIpLimit, async (c) => {
     const { token } = await issueUserToken(user.id, 'password-reset')
     const url = `${env.PUBLIC_ORIGIN}/reset?token=${encodeURIComponent(token)}`
     const tpl = passwordResetTemplate(url, user.name)
-    await sendEmail({ to: user.email, ...tpl, tag: 'password-reset' })
+    const r = await sendEmail({ to: user.email, ...tpl, tag: 'password-reset' })
+    if (!r.ok) console.error('[auth/forgot] reset send failed:', r.error)
   }
   return c.json({ ok: true, data: { sent: true } })
 })
