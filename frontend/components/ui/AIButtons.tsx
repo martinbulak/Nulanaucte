@@ -12,41 +12,138 @@ interface CategorizeResult {
   tokens?: number
 }
 
+type Phase = 'idle' | 'fetching' | 'ai' | 'rules' | 'done' | 'error'
+
 export function CategorizeButton({ onDone }: { onDone?: () => void }) {
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
+  const [phase, setPhase] = useState<Phase>('idle')
+  const [result, setResult] = useState<CategorizeResult | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [elapsed, setElapsed] = useState(0)
 
   async function run() {
-    setBusy(true)
-    setMsg(null)
-    const res = await apiFetch<CategorizeResult>('/api/ai/categorize', { method: 'POST' })
-    setBusy(false)
-    if (!res.ok) {
-      setMsg(res.error)
-      return
+    setPhase('fetching')
+    setResult(null)
+    setErr(null)
+    setElapsed(0)
+    const startedAt = Date.now()
+    const ticker = setInterval(() => setElapsed(Math.round((Date.now() - startedAt) / 1000)), 250)
+
+    // Phase progression — purely cosmetic, but tells the user something is happening
+    const t1 = setTimeout(() => setPhase('ai'), 800)
+    const t2 = setTimeout(() => setPhase('rules'), 3500)
+
+    try {
+      const res = await apiFetch<CategorizeResult>('/api/ai/categorize', { method: 'POST' })
+      clearInterval(ticker)
+      clearTimeout(t1)
+      clearTimeout(t2)
+      if (!res.ok) {
+        setPhase('error')
+        setErr(res.error)
+        return
+      }
+      setResult(res.data)
+      setPhase('done')
+      onDone?.()
+    } catch (e: unknown) {
+      clearInterval(ticker)
+      clearTimeout(t1)
+      clearTimeout(t2)
+      setPhase('error')
+      setErr(e instanceof Error ? e.message : 'Neznáma chyba')
     }
-    if (res.data.processed === 0) {
-      setMsg('✓ Všetko už zaradené.')
-    } else {
-      setMsg(
-        `✓ Roztriedil som ${res.data.updated} transakcií ${
-          res.data.usedAI ? 'cez AI' : '(rule-based, pridaj OPENAI_API_KEY pre AI)'
-        }.`,
-      )
-    }
-    onDone?.()
-    setTimeout(() => setMsg(null), 6000)
   }
 
+  const busy = phase === 'fetching' || phase === 'ai' || phase === 'rules'
+
   return (
-    <div className="inline-flex items-center gap-3">
+    <div className="inline-flex flex-col items-start gap-1.5 max-w-full">
       <button onClick={run} disabled={busy} className={PRIMARY}>
-        {busy ? '✦ Triedim kúzlom… ✦' : '🔮 Roztriediť výdavky kúzlom'}
+        {phase === 'idle' && '🔮 Roztriediť výdavky kúzlom'}
+        {phase === 'fetching' && '✦ Zhromažďujem pergameny…'}
+        {phase === 'ai' && '🪄 Vyvolávam AI duchov…'}
+        {phase === 'rules' && '🔮 Triedim transakcie…'}
+        {phase === 'done' && '🔮 Roztriediť výdavky kúzlom'}
+        {phase === 'error' && '🔮 Roztriediť výdavky kúzlom'}
       </button>
-      {msg && <span className="font-ui italic text-sm text-text-secondary">{msg}</span>}
+
+      {busy && (
+        <div className="font-ui italic text-xs text-text-secondary flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full bg-gold animate-pulse" />
+          <span>
+            {phase === 'fetching' && 'Načítavam nezaradené transakcie…'}
+            {phase === 'ai' && `AI číta tvoje transakcie · ${elapsed}s`}
+            {phase === 'rules' && `Triedi do kategórií · ${elapsed}s`}
+          </span>
+        </div>
+      )}
+
+      {phase === 'done' && result && (
+        <ResultPill result={result} onDismiss={() => setPhase('idle')} />
+      )}
+
+      {phase === 'error' && err && (
+        <div className="font-ui italic text-xs text-crimson-bright">
+          ⚠ {err}
+          <button
+            onClick={() => setPhase('idle')}
+            className="ml-2 underline hover:text-crimson"
+          >
+            zrušiť
+          </button>
+        </div>
+      )}
     </div>
   )
 }
+
+function ResultPill({
+  result,
+  onDismiss,
+}: {
+  result: CategorizeResult
+  onDismiss: () => void
+}) {
+  if (result.processed === 0) {
+    return (
+      <div className="font-ui italic text-xs text-text-secondary flex items-center gap-2">
+        <span>✓ Všetky transakcie sú už zaradené.</span>
+        <button onClick={onDismiss} className="underline text-text-muted hover:text-text-primary">
+          OK
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="font-ui text-xs leading-relaxed bg-gold/10 border border-gold/30 rounded-[3px] px-3 py-2 max-w-md">
+      <p className={result.usedAI ? 'text-gold-bright' : 'text-text-secondary'}>
+        ✓ Roztriedil som <strong>{result.updated}</strong> transakcií{' '}
+        {result.usedAI ? (
+          <>
+            <strong>cez AI</strong>
+            {result.tokens && (
+              <span className="text-text-muted"> · {result.tokens.toLocaleString('sk-SK')} tokenov</span>
+            )}
+          </>
+        ) : (
+          <>
+            <strong>rule-based</strong>
+            <span className="text-text-muted"> (OpenAI key chýba alebo zlyhal)</span>
+          </>
+        )}
+        .
+      </p>
+      <button
+        onClick={onDismiss}
+        className="mt-1 font-heading text-[0.6rem] uppercase tracking-widest text-text-muted hover:text-gold underline"
+      >
+        zatvoriť
+      </button>
+    </div>
+  )
+}
+
+// ===================== RAUL =====================
 
 interface RaulData {
   period: string
@@ -59,28 +156,42 @@ interface RaulResult {
   usedAI: boolean
 }
 
+type RaulPhase = 'idle' | 'loading' | 'analyzing' | 'writing' | 'done' | 'error'
+
 export function RaulPanel({ month }: { month: string }) {
   const [data, setData] = useState<RaulData | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [phase, setPhase] = useState<RaulPhase>('loading')
+  const [usedAI, setUsedAI] = useState<boolean | null>(null)
+  const [elapsed, setElapsed] = useState(0)
   const [err, setErr] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
 
   async function load() {
-    setLoaded(false)
+    setPhase('loading')
     const res = await apiFetch<RaulData>(`/api/ai/recommendations?month=${encodeURIComponent(month)}`)
+    setPhase('idle')
     setLoaded(true)
     if (res.ok) setData(res.data)
   }
 
   async function generate() {
-    setBusy(true)
     setErr(null)
+    setUsedAI(null)
+    setPhase('analyzing')
+    setElapsed(0)
+    const startedAt = Date.now()
+    const ticker = setInterval(() => setElapsed(Math.round((Date.now() - startedAt) / 1000)), 250)
+    const t1 = setTimeout(() => setPhase('writing'), 2500)
+
     const res = await apiFetch<RaulResult>('/api/ai/recommendations', {
       method: 'POST',
       body: JSON.stringify({ month }),
     })
-    setBusy(false)
+    clearInterval(ticker)
+    clearTimeout(t1)
+
     if (!res.ok) {
+      setPhase('error')
       setErr(res.error)
       return
     }
@@ -88,12 +199,15 @@ export function RaulPanel({ month }: { month: string }) {
       period: res.data.period,
       recommendation: { content: res.data.content, createdAt: new Date().toISOString() },
     })
+    setUsedAI(res.data.usedAI)
+    setPhase('done')
   }
 
-  // Lazy load on first mount
-  if (!loaded && !data) {
+  if (!loaded && phase === 'loading') {
     load()
   }
+
+  const busy = phase === 'analyzing' || phase === 'writing'
 
   return (
     <div>
@@ -107,9 +221,21 @@ export function RaulPanel({ month }: { month: string }) {
           </h2>
         </div>
         <button onClick={generate} disabled={busy} className={PRIMARY}>
-          {busy ? '✦ Raul fajčí cigaru… ✦' : data?.recommendation ? '🔄 Vygenerovať znovu' : '⚡ Spýtať sa Raula'}
+          {phase === 'analyzing' && '✦ Raul číta tvoj výpis…'}
+          {phase === 'writing' && '🪄 Raul fajčí a píše…'}
+          {!busy && (data?.recommendation ? '🔄 Vygenerovať znovu' : '⚡ Spýtať sa Raula')}
         </button>
       </div>
+
+      {busy && (
+        <div className="font-ui italic text-sm text-text-secondary flex items-center gap-2 mb-3">
+          <span className="inline-block w-2 h-2 rounded-full bg-gold animate-pulse" />
+          <span>
+            {phase === 'analyzing' && `Analyzujem transakcie, top kategórie, zmeny vs. minulý mesiac · ${elapsed}s`}
+            {phase === 'writing' && `Raul si zapaľuje cigaru a píše komentár · ${elapsed}s`}
+          </span>
+        </div>
+      )}
 
       {err && (
         <div className="bg-crimson/10 border border-crimson/30 border-l-[3px] border-l-crimson-bright rounded-[3px] px-4 py-3 mb-4">
@@ -120,26 +246,41 @@ export function RaulPanel({ month }: { month: string }) {
       {data?.recommendation ? (
         <div className="bg-stone/40 border border-border-dim border-l-[3px] border-l-gold rounded-[3px] px-5 py-4">
           <RaulMarkdown content={data.recommendation.content} />
-          <p className="font-ui text-xs text-text-muted italic mt-3">
-            ✦ {new Date(data.recommendation.createdAt).toLocaleString('sk-SK')}
-          </p>
+          <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-border-dim/50">
+            <p className="font-ui text-xs text-text-muted italic">
+              ✦ {new Date(data.recommendation.createdAt).toLocaleString('sk-SK')}
+            </p>
+            {usedAI !== null && (
+              <span
+                className={`font-heading text-[0.6rem] uppercase tracking-widest px-2 py-0.5 rounded-[2px] border ${
+                  usedAI
+                    ? 'text-gold-bright border-gold/40 bg-gold/10'
+                    : 'text-text-muted border-border-dim bg-stone/40'
+                }`}
+                title={usedAI ? 'GPT-4o-mini' : 'OpenAI nedostupný — rule-based stub'}
+              >
+                {usedAI ? '🪄 AI' : 'rule-based'}
+              </span>
+            )}
+          </div>
         </div>
       ) : (
-        <div className="text-center py-8 border border-dashed border-border-dim rounded-[3px]">
-          <p className="text-3xl text-gold-dim mb-2">🦉</p>
-          <p className="font-heading text-sm uppercase tracking-widest text-text-muted">
-            Raul ešte nemá veštbu pre tento mesiac
-          </p>
-          <p className="font-ui text-xs text-text-muted italic mt-1">
-            Klikni „Spýtať sa Raula" — pozrie tvoje výdavky a niečo k tomu povie.
-          </p>
-        </div>
+        !busy && (
+          <div className="text-center py-8 border border-dashed border-border-dim rounded-[3px]">
+            <p className="text-3xl text-gold-dim mb-2">🦉</p>
+            <p className="font-heading text-sm uppercase tracking-widest text-text-muted">
+              Raul ešte nemá veštbu pre tento mesiac
+            </p>
+            <p className="font-ui text-xs text-text-muted italic mt-1">
+              Klikni „Spýtať sa Raula" — pozrie tvoje výdavky a niečo k tomu povie.
+            </p>
+          </div>
+        )
       )}
     </div>
   )
 }
 
-/** Minimal markdown renderer — bold, italics, code, line breaks. No raw HTML. */
 function RaulMarkdown({ content }: { content: string }) {
   const html = content
     .replace(/&/g, '&amp;')
