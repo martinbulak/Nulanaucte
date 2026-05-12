@@ -488,6 +488,136 @@ Vyrob krátky komentár v Raulovom štýle.`,
   }
 }
 
+// ---------------- CLIPPY TIPS ----------------
+//
+// Short, witty one-liner tips for the floating mascot. Driven by the same
+// input as Raul recommendations but with a different prompt — output is a
+// flat array of plain strings, no markdown, no numbering. Each tip ≤ 100
+// chars. Used by RaulClippy in the corner.
+
+const CLIPPY_PROMPT = `Si Raul Rodriguez — finančný manažér s cigarou. Tvoja úloha: vyplodiť presne 12 ULTRA-KRÁTKYCH tipov založených na dátach používateľa.
+
+ŠTÝL:
+- Suchý sarkazmus, mierne sebavedomé, ale BEZ moralizovania.
+- Konkrétne sumy a názvy obchodov z dát, NIE generické fráze.
+- 1 veta = 1 tip. Max 100 znakov. Ideálne 60-80.
+- Slovenčina.
+- Občas pridaj odkaz na "galeóny", "Apparátora", "dementora", "Wolt nie je člen rodiny".
+- Max 1 emoji na tip, použi zriedkavo a strategicky (✦ 🍕 🚗 ⚡).
+- NEPÍŠ "tip:", "rada:", "odporúčam:". Iba samotná veta.
+
+PRAVIDLÁ:
+- Vráť LEN JSON: {"tips": ["...","...",...]}
+- Presne 12 tipov. Ani menej, ani viac.
+- ŽIADNE čísla, ŽIADNE odrážky.
+- Žiadne investičné rady (akcie, ETF). Žiadne úvery, poistenia.
+- Buď KONKRÉTNY — ak vidíš v dátach "Tesco 187 €", spomeň to.
+- Mix 4 typov tipov:
+  1. Pozorovanie + úspora ("Wolt 240 € — varenie 3x týždeň = ~120 € späť")
+  2. Sarkastické zhrnutie ("Káva za 87 € mesačne. Si v Starbucks-e na obed?")
+  3. Pochvala ak je čo pochváliť ("Bilancia +312 € — Apparátor sa skoro usmial.")
+  4. Drobná akčná výzva ("Pretrieď tých 23 nezaradených v /vydavky.")
+- Kontextové vtipy: ak vidíš nezvyčajné kategórie / sumy, ťahaj z nich.
+
+PRÍKLADY GOOD (drž sa tohto vibe):
+- "Wolt 240 €. Varenie 3× týždeň = 120 € späť. Voda + ryža netreba PIN."
+- "Káva 87 € za mesiac. 12 dní úvodzoviek do dôchodku."
+- "Tesco 187 €. Lidl by ti vrátil 30 €. Galeóny netiekli — utiekli."
+- "Bilancia +423 €. Apparátor zdvihol obočie — pozitívne."
+- "Pretrieď 14 nezaradených v /vydavky. Bez nich aj Raul máta v hmle."
+- "Auto-servis 380 € — buď pravidelne, alebo veľa naraz. Vyber si."
+- "Streaming 47 €. Netflix + HBO + Disney+. Konzument storočia."`
+
+export async function generateClippyTips(
+  input: SpendingSummaryInput,
+): Promise<{ tips: string[]; usedAI: boolean; tokens?: number }> {
+  const client = getClient()
+  if (!client) {
+    return { tips: stubClippyTips(input), usedAI: false }
+  }
+
+  try {
+    const res = await client.chat.completions.create({
+      model: MODEL,
+      temperature: 0.85, // bump for personality variation across tips
+      max_tokens: 600,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: CLIPPY_PROMPT },
+        {
+          role: 'user',
+          content: `Mesiac: ${input.monthLabel}
+Príjmy: ${input.totalIncome.toFixed(0)} €
+Výdavky: ${input.totalExpense.toFixed(0)} €
+Bilancia: ${(input.totalIncome - input.totalExpense).toFixed(0)} €
+
+Top kategórie výdavkov:
+${input.topCategories.map((c) => `- ${c.category}: ${c.total.toFixed(0)} € (${c.count}×)`).join('\n')}
+
+Zmena oproti predošlému mesiacu:
+${
+  input.changeVsLast.length === 0
+    ? '(žiadne dáta z predošlého mesiaca)'
+    : input.changeVsLast
+        .map((c) => `- ${c.category}: ${c.delta > 0 ? '+' : ''}${c.delta.toFixed(0)} € (${c.pct > 0 ? '+' : ''}${c.pct.toFixed(0)} %)`)
+        .join('\n')
+}
+
+Najväčšie transakcie:
+${input.largestTransactions.map((t) => `- ${t.date} · ${t.note} · ${t.amount.toFixed(0)} € (${t.category})`).join('\n')}
+
+Vyrob presne 12 krátkych vtipných tipov.`,
+        },
+      ],
+    })
+    const raw = res.choices[0]?.message?.content ?? '{"tips":[]}'
+    const parsed = JSON.parse(raw) as { tips?: unknown }
+    const tipsArr = Array.isArray(parsed.tips) ? parsed.tips : []
+    const tips = tipsArr
+      .filter((t): t is string => typeof t === 'string')
+      .map((t) => t.trim())
+      .filter((t) => t.length > 5 && t.length <= 120)
+      .slice(0, 15)
+    if (tips.length === 0) return { tips: stubClippyTips(input), usedAI: false }
+    return { tips, usedAI: true, tokens: res.usage?.total_tokens ?? 0 }
+  } catch (e) {
+    console.error(
+      '[ai] clippy tips failed, using stub:',
+      e instanceof Error ? e.message : e,
+    )
+    return { tips: stubClippyTips(input), usedAI: false }
+  }
+}
+
+function stubClippyTips(input: SpendingSummaryInput): string[] {
+  const bilancia = input.totalIncome - input.totalExpense
+  const top = input.topCategories[0]
+  const second = input.topCategories[1]
+  const biggest = input.largestTransactions[0]
+  const out: string[] = []
+  out.push(
+    bilancia >= 0
+      ? `Bilancia ${bilancia.toFixed(0)} €. Apparátor sa skoro usmial.`
+      : `Bilancia ${bilancia.toFixed(0)} €. Apparátor zdvihol obočie.`,
+  )
+  if (top) {
+    out.push(`Top kategória: ${top.category} ${top.total.toFixed(0)} €. ${top.count}× pohyb.`)
+  }
+  if (second) {
+    out.push(`${second.category} ${second.total.toFixed(0)} € — galeóny pekne tečú.`)
+  }
+  if (biggest) {
+    out.push(`Najväčší výdavok: ${biggest.note} · ${biggest.amount.toFixed(0)} €.`)
+  }
+  for (const c of input.changeVsLast.slice(0, 3)) {
+    out.push(
+      `${c.category} ${c.pct > 0 ? '↑' : '↓'} ${Math.abs(c.pct).toFixed(0)} % oproti minulému mesiacu.`,
+    )
+  }
+  out.push('Pre živé vtipné tipy nastav OPENAI_API_KEY. Toto je len ukážka.')
+  return out
+}
+
 function stubRecommendations(input: SpendingSummaryInput): string {
   const top = input.topCategories[0]
   const bilancia = input.totalIncome - input.totalExpense

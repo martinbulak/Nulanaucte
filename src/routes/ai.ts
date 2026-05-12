@@ -5,7 +5,9 @@ import {
   applyCategoryUpdates,
   applyRulesToTransactions,
   categorySummary,
+  findLatestClippyPeriod,
   findTransactionById,
+  getClippyTips,
   getLatestRecommendation,
   listMerchantRules,
   listReanalyzableTransactions,
@@ -13,12 +15,14 @@ import {
   listUncategorizedTransactions,
   listUserCategories,
   merchantKey,
+  saveClippyTips,
   saveRecommendation,
   upsertMerchantRule,
 } from '../db.js'
 import {
   CATEGORIES,
   categorizeBatch,
+  generateClippyTips,
   generateRecommendations,
   type Category,
 } from '../lib/ai.js'
@@ -390,16 +394,33 @@ aiRoutes.post('/recommendations', aiExpensiveLimit, async (c) => {
       category: t.category,
     }))
 
-  const result = await generateRecommendations({
+  const summaryInput = {
     monthLabel: monthLabel(month),
     totalIncome,
     totalExpense,
     topCategories: byCategoryFiltered.slice(0, 5),
     changeVsLast,
     largestTransactions,
-  })
-
+  }
+  const result = await generateRecommendations(summaryInput)
   await saveRecommendation(user.id, month, result.content)
+
+  // Side-effect: refresh the clippy tips for the SAME month using the SAME
+  // dashboard input. Different prompt, separate OpenAI call (~$0.0005), but
+  // happens in the same logical "user asked Raul for analysis" beat so the
+  // cost is part of that explicit action. Mascot tips stay in sync with the
+  // long-form Raul recommendation the user just regenerated.
+  let clippyCount = 0
+  try {
+    const clippy = await generateClippyTips(summaryInput)
+    if (clippy.tips.length > 0) {
+      await saveClippyTips(user.id, month, clippy.tips)
+      clippyCount = clippy.tips.length
+    }
+  } catch (e) {
+    // Non-fatal — Raul rec already saved. Just log and move on.
+    console.warn('[ai] clippy refresh failed:', e instanceof Error ? e.message : e)
+  }
 
   return c.json({
     ok: true,
@@ -407,6 +428,43 @@ aiRoutes.post('/recommendations', aiExpensiveLimit, async (c) => {
       period: month,
       content: result.content,
       usedAI: result.usedAI,
+      clippyTips: clippyCount,
+    },
+  })
+})
+
+/**
+ * GET /api/ai/clippy-tips?month=YYYY-MM
+ *
+ * Returns the cached clippy tips for the given month. If none exist for the
+ * requested month, falls back to the most recent month that DOES have cached
+ * tips (so the mascot has something to show even if the user is browsing
+ * older months). Empty tips array if nothing cached yet — widget hides.
+ *
+ * Does NOT auto-generate — generation happens as a side-effect of
+ * POST /api/ai/recommendations to keep all OpenAI cost gated behind the
+ * user's explicit "Spýtať sa Raula" click.
+ */
+aiRoutes.get('/clippy-tips', aiReadLimit, async (c) => {
+  const user = c.get('user')
+  const requested = c.req.query('month')
+  let period = requested && /^\d{4}-\d{2}$/.test(requested) ? requested : null
+  let tips: string[] | null = period ? await getClippyTips(user.id, period) : null
+
+  // Fallback — pick the most recent month with cached tips
+  if (!tips || tips.length === 0) {
+    const fallback = await findLatestClippyPeriod(user.id)
+    if (fallback) {
+      period = fallback
+      tips = await getClippyTips(user.id, fallback)
+    }
+  }
+
+  return c.json({
+    ok: true,
+    data: {
+      period: period ?? null,
+      tips: tips ?? [],
     },
   })
 })

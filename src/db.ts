@@ -70,6 +70,22 @@ export async function ensureSeeded(): Promise<void> {
   await db.execute(sqlOp`
     ALTER TABLE banks ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE
   `)
+  // Clippy tips — short one-liner witty/realistic suggestions parsed from
+  // the same dashboard data Raul sees. Cached per (user, period). Tips
+  // column is a JSON array of plain strings (no markdown, no numbering).
+  await db.execute(sqlOp`
+    CREATE TABLE IF NOT EXISTS clippy_tips (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      period TEXT NOT NULL,
+      tips TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sqlOp`
+    CREATE UNIQUE INDEX IF NOT EXISTS clippy_tips_user_period_uq
+      ON clippy_tips(user_id, period)
+  `)
 
   // Check whether the seed user already exists (case-insensitive)
   const existing = await findUserByEmail('koduvanica')
@@ -684,6 +700,59 @@ export async function saveRecommendation(
   content: string,
 ): Promise<void> {
   await db.insert(recommendations).values({ userId, period, content })
+}
+
+// ---------------- CLIPPY TIPS ----------------
+//
+// Cached array of short witty Raul-style tips per user+month. Lives in its
+// own table because it's a separate AI output from the longer Raul rec
+// (different prompt, different cardinality — 12+ short lines vs 3 numbered
+// items). The widget reads these; the POST /api/ai/recommendations flow
+// regenerates them on the same trigger as a fresh Raul rec.
+
+export async function getClippyTips(
+  userId: number,
+  period: string,
+): Promise<string[] | null> {
+  const rows = await db.execute<{ tips: string }>(sqlOp`
+    SELECT tips FROM clippy_tips
+    WHERE user_id = ${userId} AND period = ${period}
+    LIMIT 1
+  `)
+  const r = rows.rows[0]
+  if (!r) return null
+  try {
+    const parsed = JSON.parse(r.tips)
+    return Array.isArray(parsed) ? parsed.filter((t) => typeof t === 'string') : null
+  } catch {
+    return null
+  }
+}
+
+export async function saveClippyTips(
+  userId: number,
+  period: string,
+  tips: string[],
+): Promise<void> {
+  if (tips.length === 0) return
+  const payload = JSON.stringify(tips)
+  await db.execute(sqlOp`
+    INSERT INTO clippy_tips (user_id, period, tips)
+    VALUES (${userId}, ${period}, ${payload})
+    ON CONFLICT (user_id, period) DO UPDATE
+      SET tips = EXCLUDED.tips, created_at = NOW()
+  `)
+}
+
+/** Most recent period for which we have clippy tips (across all months). */
+export async function findLatestClippyPeriod(userId: number): Promise<string | null> {
+  const rows = await db.execute<{ period: string }>(sqlOp`
+    SELECT period FROM clippy_tips
+    WHERE user_id = ${userId}
+    ORDER BY period DESC
+    LIMIT 1
+  `)
+  return rows.rows[0]?.period ?? null
 }
 
 export async function deleteAllTransactions(userId: number): Promise<{ count: number }> {
