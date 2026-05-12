@@ -29,21 +29,21 @@ export function Sidebar({ user, onLogout }: Props) {
   const isDark = theme === 'dark'
   return (
     <aside className="w-72 shrink-0 bg-obsidian/80 backdrop-blur-md border-r border-border-dim flex flex-col h-screen sticky top-0">
-      {/* Brand */}
+      {/* Brand — clickable, goes back to dashboard */}
       <div className="px-6 pt-7 pb-5 border-b border-border-dim relative text-center">
         <span className="absolute top-2 left-2 text-gold/40 text-[10px]">✦</span>
         <span className="absolute top-2 right-2 text-gold/40 text-[10px]">✦</span>
-        <div className="inline-flex items-center justify-center gap-2.5 text-gold-bright">
-          <BrandLogo
-            className="w-9 h-9 shrink-0"
-            // gold glow shadow on the SVG
-          />
-          <h1
-            className="font-display text-2xl leading-none [text-shadow:0_0_24px_rgba(201,151,42,0.4)]"
-          >
+        <Link
+          to="/dashboard"
+          className="inline-flex items-center justify-center gap-2.5 text-gold-bright group rounded-[3px] -m-1 p-1 hover:bg-gold/5 transition-colors"
+          aria-label="Naspäť na hlavný dashboard"
+          title="Naspäť na hlavný dashboard"
+        >
+          <BrandLogo className="w-9 h-9 shrink-0" />
+          <h1 className="font-display text-2xl leading-none [text-shadow:0_0_24px_rgba(201,151,42,0.4)] group-hover:text-gold transition-colors">
             Nula na účte
           </h1>
-        </div>
+        </Link>
         <p className="font-body italic text-text-secondary text-sm mt-2 leading-snug">
           Raul uprace tvoje financie. Lebo ty nevieš. Zadarmo.
         </p>

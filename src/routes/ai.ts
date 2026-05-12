@@ -26,18 +26,74 @@ import {
 export const aiRoutes = new Hono()
 
 aiRoutes.use('*', requireAuth)
-// AI calls are pricey — limit per user
-const aiLimit = rateLimit({
-  name: 'ai-user',
-  max: 30,
+
+// Rate limits — splitting cheap reads from expensive AI calls so normal dashboard
+// browsing doesn't burn through the same budget as OpenAI mutations.
+//
+//   /api/ai/categories         (GET)   — datalist source, called on every page load
+//   /api/ai/recommendations    (GET)   — reads cached Raul rec, cheap
+//   /api/ai/transactions/:id/category (PATCH) — single-row update, no OpenAI call
+//   /api/ai/categorize         (POST)  — EXPENSIVE: chunked OpenAI calls (~$0.001/run)
+//   /api/ai/recommendations    (POST)  — EXPENSIVE: one OpenAI call (~$0.001/run)
+//
+// Cheap operations get generous budget so dashboard works smoothly even on
+// nervous-refresh browsing. Expensive ones stay tight to bound monthly OpenAI
+// spend per user.
+
+const aiReadLimit = rateLimit({
+  name: 'ai-read',
+  max: 300,
   windowMs: 60 * 60 * 1000,
   keyer: (c) => `u:${c.get('user').id}`,
+  onLimit: (c, retryAfterSec) =>
+    c.json(
+      {
+        ok: false,
+        error: `Príliš veľa requestov za hodinu. Skús znovu o ${Math.ceil(retryAfterSec / 60)} min.`,
+        code: 'RATE_LIMIT_READ',
+      },
+      429,
+    ),
 })
-aiRoutes.use('*', aiLimit)
+
+const aiEditLimit = rateLimit({
+  name: 'ai-edit',
+  max: 200,
+  windowMs: 60 * 60 * 1000,
+  keyer: (c) => `u:${c.get('user').id}`,
+  onLimit: (c, retryAfterSec) =>
+    c.json(
+      {
+        ok: false,
+        error: `Príliš veľa úprav kategórií. Skús znovu o ${Math.ceil(retryAfterSec / 60)} min.`,
+        code: 'RATE_LIMIT_EDIT',
+      },
+      429,
+    ),
+})
+
+const aiExpensiveLimit = rateLimit({
+  name: 'ai-expensive',
+  max: 20,
+  windowMs: 60 * 60 * 1000,
+  keyer: (c) => `u:${c.get('user').id}`,
+  onLimit: (c, retryAfterSec) =>
+    c.json(
+      {
+        ok: false,
+        error:
+          retryAfterSec > 60
+            ? `Limit AI volaní vyčerpaný. Maximálne 20 AI requestov za hodinu kvôli OpenAI nákladom — skús znovu o ${Math.ceil(retryAfterSec / 60)} min.`
+            : `Limit AI volaní vyčerpaný. Skús znovu o ${retryAfterSec}s.`,
+        code: 'RATE_LIMIT_AI',
+      },
+      429,
+    ),
+})
 
 // ---------- META ----------
 
-aiRoutes.get('/categories', async (c) => {
+aiRoutes.get('/categories', aiReadLimit, async (c) => {
   const user = c.get('user')
   const userCats = await listUserCategories(user.id)
   const starter = [...CATEGORIES]
@@ -62,7 +118,7 @@ aiRoutes.get('/categories', async (c) => {
 
 // ---------- CATEGORIZE ----------
 
-aiRoutes.post('/categorize', async (c) => {
+aiRoutes.post('/categorize', aiExpensiveLimit, async (c) => {
   const user = c.get('user')
   // Parse optional { force: boolean } body.
   // force=false (default): only re-categorize uncategorized ("system") transactions
@@ -176,7 +232,7 @@ aiRoutes.post('/categorize', async (c) => {
 
 // ---------- MANUAL OVERRIDE ----------
 
-aiRoutes.patch('/transactions/:id/category', async (c) => {
+aiRoutes.patch('/transactions/:id/category', aiEditLimit, async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ ok: false, error: 'Neplatné id' }, 400)
@@ -259,7 +315,7 @@ function monthLabel(ym: string): string {
   return `${SK_MONTHS[parseInt(m, 10) - 1] ?? m} ${y}`
 }
 
-aiRoutes.get('/recommendations', async (c) => {
+aiRoutes.get('/recommendations', aiReadLimit, async (c) => {
   const user = c.get('user')
   const month = c.req.query('month') || new Date().toISOString().slice(0, 7)
   if (!/^\d{4}-\d{2}$/.test(month)) {
@@ -269,7 +325,7 @@ aiRoutes.get('/recommendations', async (c) => {
   return c.json({ ok: true, data: { period: month, recommendation: rec } })
 })
 
-aiRoutes.post('/recommendations', async (c) => {
+aiRoutes.post('/recommendations', aiExpensiveLimit, async (c) => {
   const user = c.get('user')
   let body: { month?: unknown }
   try {

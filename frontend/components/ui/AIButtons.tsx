@@ -190,24 +190,19 @@ interface RaulResult {
 type RaulPhase = 'idle' | 'loading' | 'analyzing' | 'writing' | 'done' | 'error'
 
 /**
- * If hasTransactionsInMonth=true and no cached recommendation exists for the
- * current month, RaulPanel auto-triggers generate() once on first load. This
- * makes the dashboard feel "alive" — user sees Raul commentary without an
- * extra click. Subsequent visits use the cached recommendation (no AI cost).
+ * Raul recommendations panel. Always shows the cached recommendation if one
+ * exists for the picked month (free, no API cost). Generation is ALWAYS
+ * triggered by an explicit user click — we used to auto-fire on first mount,
+ * but that burned through the rate-limit budget when users were just
+ * browsing across months (each unique month = 1 OpenAI call). Better to make
+ * the cost an explicit user action.
  */
-export function RaulPanel({
-  month,
-  autoGenerate = true,
-}: {
-  month: string
-  autoGenerate?: boolean
-}) {
+export function RaulPanel({ month }: { month: string }) {
   const [data, setData] = useState<RaulData | null>(null)
   const [phase, setPhase] = useState<RaulPhase>('loading')
   const [usedAI, setUsedAI] = useState<boolean | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [err, setErr] = useState<string | null>(null)
-  const [autoTriggered, setAutoTriggered] = useState<string | null>(null)
 
   // Load existing recommendation whenever the month prop changes
   // (fixes blank-screen bug from calling load() during render).
@@ -226,19 +221,6 @@ export function RaulPanel({
       alive = false
     }
   }, [month])
-
-  // Auto-trigger first generation when there's no cached recommendation for
-  // this month. Guarded by autoTriggered so we don't spam the API on
-  // re-renders or on cached-load. Only fires once per month per mount.
-  useEffect(() => {
-    if (!autoGenerate) return
-    if (phase !== 'idle') return
-    if (data?.recommendation) return // cached one already loaded
-    if (autoTriggered === month) return
-    setAutoTriggered(month)
-    void generate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoGenerate, phase, data, month])
 
   async function generate() {
     setErr(null)
@@ -331,13 +313,17 @@ export function RaulPanel({
         </div>
       ) : (
         !busy && (
-          <div className="text-center py-8 border border-dashed border-border-dim rounded-[3px]">
-            <p className="text-3xl text-gold-dim mb-2">🦉</p>
-            <p className="font-heading text-sm uppercase tracking-widest text-text-muted">
+          <div className="text-center py-8 px-4 border border-dashed border-border-dim rounded-[3px] bg-stone/20">
+            <p className="text-4xl text-gold-dim mb-3">🦉</p>
+            <p className="font-heading text-sm uppercase tracking-widest text-text-secondary mb-2">
               Raul ešte nemá veštbu pre tento mesiac
             </p>
-            <p className="font-ui text-xs text-text-muted italic mt-1">
-              Klikni „Spýtať sa Raula" — pozrie tvoje výdavky a niečo k tomu povie.
+            <p className="font-ui text-xs text-text-muted italic mb-4 max-w-md mx-auto">
+              Klikni <strong className="text-gold">„⚡ Spýtať sa Raula"</strong> vyššie a finančný manažér
+              ti za pár sekúnd vyplodí 3 konkrétne tipy ako ušetriť. Cca 0.001 USD za jedno volanie.
+            </p>
+            <p className="font-ui text-[10px] text-text-muted italic">
+              ✦ Odpoveď sa uloží — pri druhom otvorení tohto mesiaca už nestojí nič.
             </p>
           </div>
         )
