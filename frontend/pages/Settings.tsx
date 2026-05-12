@@ -1,6 +1,12 @@
 import { useEffect, useState, FormEvent } from 'react'
 import { Card } from '../components/ui/Card'
 import { apiFetch } from '../utils/api'
+import {
+  getClippyPrefs,
+  setClippyPrefs,
+  type ClippyMode,
+  type ClippySize,
+} from '../utils/clippyPrefs'
 
 interface Me {
   id: number
@@ -553,12 +559,37 @@ function CategoryRegistryColumn({
 
 // ---------------- Clippy ----------------
 
-const CLIPPY_STORAGE_KEY = 'nu_clippy_dismissed_until'
+const CLIPPY_DISMISS_KEY = 'nu_clippy_dismissed_until'
+
+const MODE_OPTIONS: Array<{ value: ClippyMode; label: string; hint: string }> = [
+  {
+    value: 'on',
+    label: 'Zapnuté',
+    hint: 'Plný widget — bublina + avatar, tipy sa píšu sami a striedajú každých ~12 s.',
+  },
+  {
+    value: 'mascot',
+    label: 'Iba ikona Raula',
+    hint: 'Vidíš len avatar v rohu. Bublina sa zobrazí keď naňho klikneš a po 8 s sa schová.',
+  },
+  {
+    value: 'off',
+    label: 'Vypnuté',
+    hint: 'Žiadny widget v rohu. Tipy si môžeš pozrieť v dlhom Raul paneli na dashboarde.',
+  },
+]
+
+const SIZE_OPTIONS: Array<{ value: ClippySize; label: string; hint: string }> = [
+  { value: 'sm', label: 'Malé', hint: '10.5 px text, kompaktný avatar' },
+  { value: 'md', label: 'Stredné', hint: '12.5 px text · default (+20 % oproti pôvodnému)' },
+  { value: 'lg', label: 'Veľké', hint: '15 px text, väčší avatar — pre 4K monitory' },
+]
 
 function ClippySection() {
+  const [prefs, setPrefsState] = useState(() => getClippyPrefs())
   const [dismissedUntil, setDismissedUntil] = useState<number | null>(() => {
     try {
-      const raw = localStorage.getItem(CLIPPY_STORAGE_KEY)
+      const raw = localStorage.getItem(CLIPPY_DISMISS_KEY)
       if (!raw) return null
       const n = parseInt(raw, 10)
       return Number.isFinite(n) && n > Date.now() ? n : null
@@ -567,15 +598,21 @@ function ClippySection() {
     }
   })
 
-  function restore() {
+  function update(patch: Partial<ReturnType<typeof getClippyPrefs>>) {
+    const next = { ...prefs, ...patch }
+    setPrefsState(next)
+    setClippyPrefs(next) // dispatches the global event → widget updates live
+  }
+
+  function restoreFromDismiss() {
     try {
-      localStorage.removeItem(CLIPPY_STORAGE_KEY)
+      localStorage.removeItem(CLIPPY_DISMISS_KEY)
     } catch {
       /* ignore */
     }
     setDismissedUntil(null)
-    // Force the widget to remount with fresh state by reloading the page —
-    // simpler than wiring a global event bus for one button.
+    // Force the widget to remount with fresh state — the dismiss check is in
+    // useState init, so a soft re-render won't see the cleared value.
     window.location.reload()
   }
 
@@ -586,32 +623,93 @@ function ClippySection() {
           ✦ Raul v rohu
         </p>
         <h2 className="font-heading text-xl text-text-primary tracking-wide mb-2">
-          Raulove tipy
+          Raulove tipy (widget)
         </h2>
-        <p className="font-body text-sm text-text-secondary mb-4">
+        <p className="font-body text-sm text-text-secondary mb-5">
           Krátke vtipné tipy ktoré sa zobrazujú vpravo dole. Generujú sa, keď
-          klikneš <strong>„⚡ Spýtať sa Raula"</strong> na dashboarde —
-          z rovnakých dát ako dlhé odporúčania.
+          klikneš <strong>„⚡ Spýtať sa Raula"</strong> na dashboarde — z rovnakých
+          dát ako dlhé odporúčania. Zmeny sa prejavia okamžite, bez reloadu.
         </p>
 
-        {dismissedUntil ? (
-          <div className="bg-stone/50 border border-border-dim border-l-[3px] border-l-gold-dim rounded-[3px] px-4 py-3 mb-3">
-            <p className="font-body text-sm text-text-secondary">
-              Tipy si si skryl do{' '}
-              <strong>{new Date(dismissedUntil).toLocaleString('sk-SK')}</strong>.
-              Klikni nižšie a Raul sa znova ozve.
-            </p>
-          </div>
-        ) : (
-          <p className="font-ui text-sm italic text-text-muted mb-3">
-            ✓ Tipy sú aktívne. Ak ich nevidíš, klikni „Spýtať sa Raula"
-            na dashboarde — pri prvej generácii sa naplnia.
+        {/* Režim */}
+        <div className="mb-5">
+          <p className="font-ui text-sm uppercase tracking-widest text-text-muted mb-2">
+            Režim
           </p>
-        )}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            {MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => update({ mode: opt.value })}
+                className={[
+                  'text-left px-3 py-2.5 rounded-[3px] border transition-all',
+                  prefs.mode === opt.value
+                    ? 'bg-gold/10 border-gold text-gold-bright'
+                    : 'bg-stone/50 border-border-dim text-text-secondary hover:border-gold-dim hover:text-text-primary',
+                ].join(' ')}
+              >
+                <p className="font-heading text-xs uppercase tracking-widest">
+                  {opt.label}
+                </p>
+                <p className="font-ui text-[11px] italic text-text-muted mt-1 leading-snug">
+                  {opt.hint}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
 
-        <button onClick={restore} className={GHOST_BTN}>
-          💡 Obnoviť Raulove tipy (reload)
-        </button>
+        {/* Veľkosť */}
+        <div className="mb-5">
+          <p className="font-ui text-sm uppercase tracking-widest text-text-muted mb-2">
+            Veľkosť textu
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            {SIZE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => update({ size: opt.value })}
+                title={opt.hint}
+                disabled={prefs.mode === 'off'}
+                className={[
+                  'font-heading text-xs uppercase tracking-widest px-4 py-2 rounded-[3px] border transition-all',
+                  prefs.mode === 'off' && 'opacity-50 cursor-not-allowed',
+                  prefs.size === opt.value && prefs.mode !== 'off'
+                    ? 'bg-gold/15 border-gold text-gold-bright'
+                    : 'bg-stone/50 border-border-dim text-text-secondary hover:border-gold-dim',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="font-ui text-[11px] italic text-text-muted mt-2">
+            Default (Stredné) = +20 % oproti pôvodnému; tipy sú teraz 2× dlhšie
+            (max ~200 znakov).
+          </p>
+        </div>
+
+        {/* Dočasné skrytie (× tlačidlo v bubline) */}
+        {dismissedUntil && prefs.mode !== 'off' && (
+          <div className="bg-stone/50 border border-border-dim border-l-[3px] border-l-gold-dim rounded-[3px] px-4 py-3 mb-2">
+            <p className="font-body text-sm text-text-secondary">
+              Skryl si tipy do{' '}
+              <strong>{new Date(dismissedUntil).toLocaleString('sk-SK')}</strong>
+              {' '}(klik na × na bubline). Klikni nižšie ak ti to majú vrátiť
+              hneď.
+            </p>
+            <button
+              onClick={restoreFromDismiss}
+              className={`${GHOST_BTN} mt-3`}
+            >
+              💡 Obnoviť tipy hneď
+            </button>
+          </div>
+        )}
       </Card>
     </div>
   )
