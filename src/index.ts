@@ -107,7 +107,14 @@ app.get('/api/dashboard/summary', requireAuth, async (c) => {
     listMonthsWithData(user.id),
   ])
 
-  const month = parseMonth(c.req.query('month')) ?? pickDefaultMonth(months)
+  // Resolve mesiac: ak frontend pýta konkrétny YYYY-MM a máme preň dáta,
+  // použijeme ho. Ak preň nemáme dáta (typicky default = predchádzajúci
+  // mesiac kde ešte nič nebolo naimportované), padneme na najnovší mesiac
+  // s transakciami. Frontend si potom synchronizuje state cez sumRes.data.month.
+  const requestedMonth = parseMonth(c.req.query('month'))
+  const month = requestedMonth && months.includes(requestedMonth)
+    ? requestedMonth
+    : pickDefaultMonth(months)
   const monthTxs = allTxs.filter((t) => t.date.startsWith(month))
 
   const zostatok = banks.reduce((sum, b) => sum + b.balance, 0)
@@ -162,10 +169,16 @@ app.get('/api/dashboard/summary', requireAuth, async (c) => {
 
 app.get('/api/dashboard/categories', requireAuth, async (c) => {
   const user = c.get('user')
-  const month = parseMonth(c.req.query('month'))
-  if (!month) {
+  const requested = parseMonth(c.req.query('month'))
+  if (!requested) {
     return c.json({ ok: false, error: 'Neplatný formát mesiaca (YYYY-MM)' }, 400)
   }
+  // Rovnaký smart fallback ako v /summary: ak pre požadovaný mesiac nemáme
+  // žiadne transakcie, padneme na najnovší mesiac s dátami. To zabezpečí
+  // konzistentný snapshot pri prvom načítaní (summary aj categories vrátia
+  // dáta pre rovnaký mesiac aj keď frontend pýta default ktorý je prázdny).
+  const months = await listMonthsWithData(user.id)
+  const month = months.includes(requested) ? requested : pickDefaultMonth(months)
   const [vydavkyByCat, prijemByCat] = await Promise.all([
     categorySummary(user.id, month, 'vydavok'),
     categorySummary(user.id, month, 'prijem'),

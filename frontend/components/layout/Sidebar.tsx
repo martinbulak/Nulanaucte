@@ -1,8 +1,7 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, Link } from 'react-router-dom'
 import type { AuthUser } from '../../hooks/useAuth'
 import { useTheme } from '../../hooks/useTheme'
 import { BrandLogo } from '../ui/BrandLogo'
-import { PoweredBy } from '../ui/PoweredBy'
 
 interface NavItem {
   to: string
@@ -89,9 +88,21 @@ export function Sidebar({ user, onLogout }: Props) {
         )}
       </nav>
 
-      {/* Brand credits — above the theme toggle */}
+      {/* User manual — above the theme toggle */}
       <div className="px-4 py-3 border-t border-border-dim">
-        <PoweredBy variant="stack" />
+        <Link
+          to="/navod"
+          className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[3px] border border-border-dim text-text-secondary hover:border-gold hover:text-gold-bright hover:bg-gold/5 transition-all duration-300 group"
+          title="Otvor návod a dokumentáciu k appke"
+        >
+          <span className="font-heading text-xs uppercase tracking-widest flex items-center gap-2">
+            <span className="text-gold group-hover:text-gold-bright">📜</span>
+            Návod
+          </span>
+          <span className="font-heading text-[0.55rem] tracking-widest text-text-muted group-hover:text-gold-bright">
+            ako to ovládať
+          </span>
+        </Link>
       </div>
 
       {/* Theme toggle */}

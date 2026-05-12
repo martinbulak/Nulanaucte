@@ -68,17 +68,21 @@ export function AuthShell({ eyebrow, title, subtitle, children }: Props) {
       {/* Footer: brand credits + legal links */}
       <div className="relative z-10 mt-10 reveal reveal-5 flex flex-col items-center gap-4">
         <PoweredBy variant="row" />
-        <div className="flex items-center gap-3 text-[0.65rem] font-heading uppercase tracking-widest text-text-muted">
-          <Link to="/privacy" className="hover:text-gold-bright transition-colors">
-            Ochrana súkromia
+        <div className="flex items-center gap-3 text-[0.65rem] font-heading uppercase tracking-widest text-text-muted flex-wrap justify-center">
+          <Link to="/navod" className="hover:text-gold-bright transition-colors">
+            📜 Návod
+          </Link>
+          <span>·</span>
+          <Link to="/ako-to-funguje" className="hover:text-gold-bright transition-colors">
+            Ako to funguje
           </Link>
           <span>·</span>
           <Link to="/bezpecnost" className="hover:text-gold-bright transition-colors">
             Bezpečnosť
           </Link>
           <span>·</span>
-          <Link to="/ako-to-funguje" className="hover:text-gold-bright transition-colors">
-            Ako to funguje
+          <Link to="/privacy" className="hover:text-gold-bright transition-colors">
+            Ochrana súkromia
           </Link>
         </div>
       </div>

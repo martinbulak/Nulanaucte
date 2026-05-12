@@ -7,6 +7,7 @@ import { Reset } from './pages/Reset'
 import { Privacy } from './pages/Privacy'
 import { Security } from './pages/Security'
 import { HowItWorks } from './pages/HowItWorks'
+import { Navod } from './pages/Navod'
 import { Dashboard } from './pages/Dashboard'
 import { Banky } from './pages/Banky'
 import { Prijmy } from './pages/Prijmy'
@@ -46,6 +47,7 @@ export default function App() {
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/bezpecnost" element={<Security />} />
       <Route path="/ako-to-funguje" element={<HowItWorks />} />
+      <Route path="/navod" element={<Navod />} />
 
       {/* Protected app */}
       <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

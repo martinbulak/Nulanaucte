@@ -72,8 +72,17 @@ const eurExact = new Intl.NumberFormat('sk-SK', {
 
 const BANKS = ['Slovenská sporiteľňa', 'Tatra banka', 'Revolut']
 
-function currentYearMonth(): string {
+/**
+ * Default mesiac pre dashboard = predchádzajúci kalendárny mesiac.
+ * Dôvod: keď otvoríš dashboard 12. mája, ešte nemáš plný obraz mája —
+ * pozeráš sa na apríl. Server v summary endpoint má ešte navyše fallback
+ * na "posledný mesiac s dátami" pre prípad že previous month je prázdny
+ * (napr. import len starších výpisov).
+ */
+function previousYearMonth(): string {
   const d = new Date()
+  d.setDate(1) // 1st of current month
+  d.setDate(d.getDate() - 1) // last day of previous month
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
@@ -84,7 +93,7 @@ export function Dashboard() {
   const [catRows, setCatRows] = useState<CategoryRow[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [month, setMonth] = useState<string>(currentYearMonth())
+  const [month, setMonth] = useState<string>(previousYearMonth())
 
   // Category combobox source — load once, refreshes on manual save inside <CategorySelect>.
   useEffect(() => {

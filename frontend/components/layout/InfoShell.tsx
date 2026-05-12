@@ -79,19 +79,25 @@ export function InfoShell({ eyebrow, title, children, backTo, backLabel = '← S
   )
 }
 
-/** Headline H2 inside an InfoShell. */
-export function H2({ children }: { children: ReactNode }) {
+/** Headline H2 inside an InfoShell. Pass `id` to make it an anchor target. */
+export function H2({ children, id }: { children: ReactNode; id?: string }) {
   return (
-    <h2 className="font-heading text-lg md:text-xl uppercase tracking-widest text-gold-bright mt-6 mb-2 first:mt-0">
+    <h2
+      id={id}
+      className="font-heading text-lg md:text-xl uppercase tracking-widest text-gold-bright mt-6 mb-2 first:mt-0 scroll-mt-24"
+    >
       {children}
     </h2>
   )
 }
 
 /** Headline H3 inside an InfoShell. */
-export function H3({ children }: { children: ReactNode }) {
+export function H3({ children, id }: { children: ReactNode; id?: string }) {
   return (
-    <h3 className="font-heading text-sm uppercase tracking-widest text-gold mt-4 mb-1">
+    <h3
+      id={id}
+      className="font-heading text-sm uppercase tracking-widest text-gold mt-4 mb-1 scroll-mt-24"
+    >
       {children}
     </h3>
   )
