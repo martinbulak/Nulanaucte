@@ -51,7 +51,7 @@ export function Admin() {
         <p className="font-heading text-xs uppercase tracking-[0.3em] text-gold mb-2">
           ⚱ Správca trezora ⚱
         </p>
-        <h1 className="font-display text-4xl md:text-5xl text-text-primary leading-tight [text-shadow:0_0_40px_rgba(201,151,42,0.3)]">
+        <h1 className="font-display text-3xl sm:text-4xl md:text-5xl text-text-primary leading-tight [text-shadow:0_0_40px_rgba(201,151,42,0.3)]">
           <span className="text-gold-bright">Admin</span> — technický prehľad
         </h1>
         <p className="font-body italic text-text-secondary mt-2">
@@ -80,8 +80,8 @@ export function Admin() {
           <h2 className="font-heading text-xl text-text-primary tracking-wide mb-4">
             Top {stats.recentSignups.length} účtov
           </h2>
-          <div className="overflow-hidden rounded-[3px] border border-border-dim">
-            <table className="w-full font-body">
+          <div className="overflow-x-auto rounded-[3px] border border-border-dim -mx-1 sm:mx-0">
+            <table className="w-full min-w-[600px] font-body">
               <thead className="bg-stone/50">
                 <tr className="border-b border-border-dim">
                   <Th>ID</Th>

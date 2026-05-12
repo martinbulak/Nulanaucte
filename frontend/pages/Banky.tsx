@@ -102,7 +102,7 @@ export function Banky() {
           <p className="font-heading text-xs uppercase tracking-[0.3em] text-gold mb-2">
             ✦ Sieň trezorov ✦
           </p>
-          <h1 className="font-display text-4xl md:text-5xl text-text-primary leading-tight [text-shadow:0_0_40px_rgba(201,151,42,0.3)]">
+          <h1 className="font-display text-3xl sm:text-4xl md:text-5xl text-text-primary leading-tight [text-shadow:0_0_40px_rgba(201,151,42,0.3)]">
             Tvoje <span className="text-gold-bright">banky</span>
           </h1>
           <p className="font-body italic text-text-secondary mt-3 text-lg">

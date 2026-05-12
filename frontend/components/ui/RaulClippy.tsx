@@ -189,7 +189,7 @@ export function RaulClippy() {
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-30 flex items-end gap-2 pointer-events-none">
+    <div className="fixed bottom-3 right-3 sm:bottom-5 sm:right-5 z-30 flex items-end gap-2 pointer-events-none max-w-[calc(100vw-1.5rem)]">
       {showBubble && (
         <div
           className={[

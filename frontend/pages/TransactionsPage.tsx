@@ -163,7 +163,7 @@ export function TransactionsPage({ type }: Props) {
           <p className="font-heading text-xs uppercase tracking-[0.3em] text-gold mb-2">
             {copy.eyebrow}
           </p>
-          <h1 className="font-display text-4xl md:text-5xl text-text-primary leading-tight [text-shadow:0_0_40px_rgba(201,151,42,0.3)]">
+          <h1 className="font-display text-3xl sm:text-4xl md:text-5xl text-text-primary leading-tight [text-shadow:0_0_40px_rgba(201,151,42,0.3)]">
             {copy.title} <span className="text-gold-bright">/ {monthLabel}</span>
           </h1>
           <p className="font-body italic text-text-secondary mt-2 text-base">{copy.quote}</p>
@@ -274,8 +274,8 @@ export function TransactionsPage({ type }: Props) {
               <p className="font-ui text-xs text-text-muted italic mt-1">{copy.emptyHint}</p>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-[3px] border border-border-dim">
-              <table className="w-full font-body">
+            <div className="overflow-x-auto rounded-[3px] border border-border-dim -mx-1 sm:mx-0">
+              <table className="w-full min-w-[720px] font-body">
                 <thead className="bg-stone/50">
                   <tr className="border-b border-border-dim">
                     <th className="font-heading text-[0.6rem] uppercase tracking-widest text-text-muted px-4 py-2.5 text-left font-normal">
