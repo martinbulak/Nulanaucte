@@ -313,10 +313,6 @@ export function Navod() {
         <li>MonthPicker zobrazuje len mesiace v ktorých máš transakcie</li>
         <li>Hover nad kategóriou pri AI-set transakcii → uvidíš confidence %</li>
         <li>Hover nad popisom transakcie → uvidíš plný originál note (skrátený merchant zobrazí raw)</li>
-        <li>
-          ☀ <strong>Lumos</strong> / ☾ <strong>Nox</strong> v sidebare → prepni svetlý / tmavý
-          režim. Voľba sa pamätá v localStorage.
-        </li>
       </ul>
 
       {/* 14 — Súkromie */}

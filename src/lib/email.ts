@@ -67,9 +67,9 @@ export async function sendEmail(
 const BRAND = 'Nula na účte'
 const TAGLINE = 'Raul uprace tvoje financie. Lebo ty nevieš. Zadarmo.'
 
-// Light "parchment by candlelight" palette — mirrors the in-app Lumos theme.
-// All emails are sent in light mode regardless of the user's in-app preference,
-// because email clients render unpredictably with dark themes.
+// "Parchment by candlelight" palette — same palette as the in-app design,
+// repeated here as static hex values because emails must inline all colors
+// (CSS custom properties don't survive most email clients).
 const LIGHT = {
   pageBg:    '#faf3e0', // void
   cardBg:    '#fffef9', // obsidian

@@ -31,7 +31,16 @@ export interface SessionUser {
   email: string
 }
 
-export type BankSource = 'slsp' | 'tatra' | 'revolut' | 'manual'
+/**
+ * Identifier for the bank/issuer. Free-form string at the DB level so we can
+ * keep adding banks without migrations; the `KNOWN_BANK_SOURCES` constant in
+ * src/lib/banks.ts defines the well-known list with import support hints.
+ *
+ * Special values:
+ *   - 'manual' — generic bucket for banks without auto-parser support
+ *   - 'slsp' | 'tatra' | 'revolut' — banks with CSV/PDF auto-detection
+ */
+export type BankSource = string
 
 export interface Bank {
   id: number
@@ -41,6 +50,7 @@ export interface Bank {
   balance: number
   currency: string
   source: BankSource
+  enabled: boolean
   createdAt: string
 }
 

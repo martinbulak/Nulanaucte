@@ -76,7 +76,13 @@ export const banks = pgTable(
     type: text('type').notNull().default('bezny'),
     balance: doublePrecision('balance').notNull().default(0),
     currency: text('currency').notNull().default('EUR'),
-    source: text('source').notNull().default('manual'), // 'slsp' | 'tatra' | 'revolut' | 'manual'
+    source: text('source').notNull().default('manual'), // 'slsp' | 'tatra' | 'revolut' | 'vub' | ...
+    /**
+     * User can toggle banks on/off in /nastavenia. Disabled banks stay in the
+     * DB (with their transactions intact) but are filtered out of /banky,
+     * dashboard summaries, and import flows. Toggle back on to restore.
+     */
+    enabled: boolean('enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

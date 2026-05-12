@@ -1,6 +1,5 @@
 import { NavLink, Link } from 'react-router-dom'
 import type { AuthUser } from '../../hooks/useAuth'
-import { useTheme } from '../../hooks/useTheme'
 import { BrandLogo } from '../ui/BrandLogo'
 
 interface NavItem {
@@ -25,8 +24,6 @@ interface Props {
 }
 
 export function Sidebar({ user, onLogout }: Props) {
-  const { theme, toggle } = useTheme()
-  const isDark = theme === 'dark'
   return (
     <aside className="w-72 shrink-0 bg-obsidian/80 backdrop-blur-md border-r border-border-dim flex flex-col h-screen sticky top-0">
       {/* Brand — clickable, goes back to dashboard */}
@@ -103,26 +100,6 @@ export function Sidebar({ user, onLogout }: Props) {
             ako to ovládať
           </span>
         </Link>
-      </div>
-
-      {/* Theme toggle */}
-      <div className="px-4 py-3 border-t border-border-dim">
-        <button
-          onClick={toggle}
-          aria-label={isDark ? 'Zapnúť svetlý režim' : 'Zapnúť tmavý režim'}
-          title={isDark ? 'Zapnúť svetlý režim (Lumos)' : 'Zapnúť tmavý režim (Nox)'}
-          className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[3px] border border-border-dim text-text-secondary hover:border-gold hover:text-gold-bright hover:bg-gold/5 transition-all duration-300 cursor-pointer group"
-        >
-          <span className="font-heading text-xs uppercase tracking-widest">
-            {isDark ? '☀ Lumos' : '☾ Nox'}
-          </span>
-          <span
-            className="text-base text-gold group-hover:text-gold-bright"
-            style={{ filter: 'drop-shadow(0 0 6px rgba(201,151,42,0.4))' }}
-          >
-            {isDark ? '✦' : '✧'}
-          </span>
-        </button>
       </div>
 
       {/* User */}

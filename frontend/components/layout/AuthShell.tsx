@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { useTheme } from '../../hooks/useTheme'
 import { BrandLogo } from '../ui/BrandLogo'
 import { PoweredBy } from '../ui/PoweredBy'
 
@@ -13,10 +12,9 @@ interface Props {
 
 /** Shared visual shell for unauthenticated pages (Login / Register / Verify / Reset). */
 export function AuthShell({ eyebrow, title, subtitle, children }: Props) {
-  const { theme, toggle } = useTheme()
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center text-center px-6 py-10 overflow-hidden">
-      {/* Floating top-right cluster: info links + theme toggle */}
+      {/* Floating top-right cluster: info links */}
       <div className="absolute top-5 right-5 z-10 flex items-center gap-2 flex-wrap justify-end max-w-[calc(100vw-2.5rem)]">
         <Link
           to="/ako-to-funguje"
@@ -30,13 +28,6 @@ export function AuthShell({ eyebrow, title, subtitle, children }: Props) {
         >
           🛡 Je to bezpečné
         </Link>
-        <button
-          onClick={toggle}
-          aria-label={theme === 'dark' ? 'Zapnúť svetlý režim' : 'Zapnúť tmavý režim'}
-          className="font-heading text-[0.65rem] uppercase tracking-widest text-text-secondary hover:text-gold-bright border border-border-dim hover:border-gold bg-obsidian/60 backdrop-blur-sm px-3 py-1.5 rounded-[3px] transition-all duration-300"
-        >
-          {theme === 'dark' ? '☀ Lumos' : '☾ Nox'}
-        </button>
       </div>
 
       {/* Background glow */}

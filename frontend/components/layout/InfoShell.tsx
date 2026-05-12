@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
 import { BrandLogo } from '../ui/BrandLogo'
 
@@ -16,11 +15,10 @@ interface Props {
 /**
  * Shared shell for informational pages (Privacy, Security, How-it-works).
  * Designed for longer-form content: wider max width, left-aligned, with a
- * persistent "back" link in the top-left and theme toggle in the top-right.
+ * persistent "back" link in the top-left.
  * Back link auto-routes to /dashboard for logged-in users.
  */
 export function InfoShell({ eyebrow, title, children, backTo, backLabel = '← Späť' }: Props) {
-  const { theme, toggle } = useTheme()
   const { user } = useAuth()
   const resolvedBackTo = backTo ?? (user ? '/dashboard' : '/login')
   return (
@@ -32,20 +30,13 @@ export function InfoShell({ eyebrow, title, children, backTo, backLabel = '← S
       </div>
 
       {/* Top bar */}
-      <div className="relative z-10 max-w-3xl mx-auto flex items-center justify-between mb-10">
+      <div className="relative z-10 max-w-3xl mx-auto flex items-center mb-10">
         <Link
           to={resolvedBackTo}
           className="font-heading text-[0.65rem] uppercase tracking-widest text-text-secondary hover:text-gold-bright border border-border-dim hover:border-gold bg-obsidian/60 backdrop-blur-sm px-3 py-1.5 rounded-[3px] transition-all duration-300"
         >
           {backLabel}
         </Link>
-        <button
-          onClick={toggle}
-          aria-label={theme === 'dark' ? 'Zapnúť svetlý režim' : 'Zapnúť tmavý režim'}
-          className="font-heading text-[0.65rem] uppercase tracking-widest text-text-secondary hover:text-gold-bright border border-border-dim hover:border-gold bg-obsidian/60 backdrop-blur-sm px-3 py-1.5 rounded-[3px] transition-all duration-300"
-        >
-          {theme === 'dark' ? '☀ Lumos' : '☾ Nox'}
-        </button>
       </div>
 
       {/* Header */}

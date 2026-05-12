@@ -64,6 +64,12 @@ export async function ensureSeeded(): Promise<void> {
   await db.execute(sqlOp`
     ALTER TABLE transactions ADD COLUMN IF NOT EXISTS merchant TEXT
   `)
+  // Column added in v0.6 — per-user bank enable/disable. Lets the user pick
+  // which Slovak banks they actually use in /nastavenia without losing
+  // historical transactions. Default true = existing banks stay enabled.
+  await db.execute(sqlOp`
+    ALTER TABLE banks ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE
+  `)
 
   // Check whether the seed user already exists (case-insensitive)
   const existing = await findUserByEmail('koduvanica')
@@ -181,13 +187,38 @@ function rowToBank(r: typeof banks.$inferSelect): Bank {
     balance: r.balance,
     currency: r.currency,
     source: r.source as BankSource,
+    enabled: r.enabled,
     createdAt: r.createdAt.toISOString(),
   }
 }
 
-export async function listBanks(userId: number): Promise<Bank[]> {
-  const rows = await db.select().from(banks).where(eq(banks.userId, userId)).orderBy(banks.id)
+/**
+ * List banks for the user. By default returns ONLY enabled banks (what user
+ * actively uses). Pass includeDisabled=true to fetch everything (used by the
+ * settings page to show on/off state for the registry).
+ */
+export async function listBanks(
+  userId: number,
+  opts: { includeDisabled?: boolean } = {},
+): Promise<Bank[]> {
+  const conds = [eq(banks.userId, userId)]
+  if (!opts.includeDisabled) conds.push(eq(banks.enabled, true))
+  const rows = await db.select().from(banks).where(and(...conds)).orderBy(banks.id)
   return rows.map(rowToBank)
+}
+
+/** Toggle the `enabled` flag on a bank the user owns. Returns updated row or null. */
+export async function setBankEnabled(
+  userId: number,
+  bankId: number,
+  enabled: boolean,
+): Promise<Bank | null> {
+  const [r] = await db
+    .update(banks)
+    .set({ enabled })
+    .where(and(eq(banks.userId, userId), eq(banks.id, bankId)))
+    .returning()
+  return r ? rowToBank(r) : null
 }
 
 export async function findBank(userId: number, bankId: number): Promise<Bank | undefined> {

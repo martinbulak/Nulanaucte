@@ -63,6 +63,7 @@ export function Settings() {
       </div>
 
       <ProfileSection me={me} onChange={load} />
+      <BanksSection />
       <PasswordSection />
       <DataSection />
       <DangerSection />
@@ -175,6 +176,176 @@ function ProfileSection({ me, onChange }: { me: Me; onChange: () => void }) {
             )}
           </div>
         </form>
+      </Card>
+    </div>
+  )
+}
+
+// ---------------- Banks ----------------
+
+interface RegistryItem {
+  source: string
+  name: string
+  icon: string
+  parserSupport: 'auto' | 'csv' | 'none'
+  category: 'classic' | 'savings' | 'neobank'
+  note?: string
+  bankId: number | null
+  enabled: boolean
+  hasAccount: boolean
+}
+
+const CATEGORY_LABEL: Record<RegistryItem['category'], string> = {
+  classic: 'Klasické banky',
+  savings: 'Stavebné sporiteľne',
+  neobank: 'Neobanky / kartové',
+}
+
+const PARSER_BADGE: Record<RegistryItem['parserSupport'], { label: string; tone: string }> = {
+  auto: { label: 'Auto-import', tone: 'text-emerald-bright border-emerald-bright/30 bg-emerald/5' },
+  csv: { label: 'CSV (manuálny formát)', tone: 'text-gold border-gold/30 bg-gold/5' },
+  none: { label: 'Iba ručne', tone: 'text-text-muted border-border-dim bg-stone/40' },
+}
+
+function BanksSection() {
+  const [items, setItems] = useState<RegistryItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null) // source currently toggling
+
+  async function load() {
+    setLoading(true)
+    const res = await apiFetch<RegistryItem[]>('/api/banks/registry')
+    if (res.ok) setItems(res.data)
+    else setErr(res.error)
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  async function toggle(item: RegistryItem) {
+    setBusy(item.source)
+    setErr(null)
+    // Optimistic UI flip
+    setItems((prev) =>
+      prev.map((it) =>
+        it.source === item.source ? { ...it, enabled: !it.enabled } : it,
+      ),
+    )
+    const res = await apiFetch('/api/banks/registry/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ source: item.source, enabled: !item.enabled }),
+    })
+    setBusy(null)
+    if (!res.ok) {
+      // Rollback
+      setItems((prev) =>
+        prev.map((it) =>
+          it.source === item.source ? { ...it, enabled: item.enabled } : it,
+        ),
+      )
+      setErr(res.error)
+    } else {
+      // Re-fetch to sync bankId / hasAccount after first creation
+      await load()
+    }
+  }
+
+  // Group by category for the UI
+  const groups = items.reduce<Record<RegistryItem['category'], RegistryItem[]>>(
+    (acc, it) => {
+      acc[it.category] = acc[it.category] || []
+      acc[it.category].push(it)
+      return acc
+    },
+    {} as Record<RegistryItem['category'], RegistryItem[]>,
+  )
+
+  return (
+    <div className="reveal reveal-3">
+      <Card>
+        <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted mb-1">
+          ✦ Banky
+        </p>
+        <h2 className="font-heading text-xl text-text-primary tracking-wide mb-2">
+          Moje banky
+        </h2>
+        <p className="font-body text-sm text-text-secondary mb-5">
+          Zaškrtni banky ktoré používaš — zobrazia sa v <code className="font-mono text-xs text-gold">/banky</code>
+          {' '}a budeš tam môcť importovať výpisy. Odčiarknuté banky sa skryjú zo zoznamu,
+          ale historické transakcie ostanú nedotknuté.
+        </p>
+
+        {loading && (
+          <p className="font-heading text-xs uppercase tracking-widest text-gold flicker py-3">
+            ✦ Načítavam zoznam… ✦
+          </p>
+        )}
+        {err && (
+          <p className="font-body text-sm text-crimson-bright mb-3">{err}</p>
+        )}
+
+        {!loading &&
+          (Object.keys(groups) as Array<RegistryItem['category']>).map((cat) => (
+            <div key={cat} className="mb-5 last:mb-0">
+              <p className="font-heading text-[0.6rem] uppercase tracking-widest text-gold-dim mb-2">
+                {CATEGORY_LABEL[cat]}
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {groups[cat].map((item) => {
+                  const badge = PARSER_BADGE[item.parserSupport]
+                  return (
+                    <label
+                      key={item.source}
+                      className={[
+                        'flex items-start gap-3 px-3 py-2.5 border rounded-[3px] cursor-pointer transition-all',
+                        item.enabled
+                          ? 'border-gold/40 bg-gold/5'
+                          : 'border-border-dim hover:border-gold-dim hover:bg-gold/[0.02]',
+                        busy === item.source ? 'opacity-60' : '',
+                      ].join(' ')}
+                      title={item.note}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={item.enabled}
+                        disabled={busy === item.source}
+                        onChange={() => toggle(item)}
+                        className="w-4 h-4 accent-gold mt-1 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-gold-bright">{item.icon}</span>
+                          <span className="font-heading text-sm text-text-primary tracking-wide truncate">
+                            {item.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap mt-1">
+                          <span
+                            className={`font-heading text-[0.55rem] uppercase tracking-widest border px-1.5 py-0.5 rounded-[2px] ${badge.tone}`}
+                          >
+                            {badge.label}
+                          </span>
+                          {item.note && (
+                            <span className="font-ui text-[10px] text-text-muted italic truncate">
+                              {item.note}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+
+        <p className="font-ui text-[0.7rem] italic text-text-muted mt-4 pt-3 border-t border-border-dim/50">
+          Tvoju banku tu nevidíš? Pridaj si ju ručne v <code className="font-mono text-xs text-gold">/banky</code> ako
+          „Iná banka (manuálne)" a pomenuj si ju ľubovoľne.
+        </p>
       </Card>
     </div>
   )

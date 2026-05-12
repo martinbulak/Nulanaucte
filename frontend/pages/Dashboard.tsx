@@ -47,6 +47,13 @@ interface Summary {
   zostatok: number
   prijmy: number
   vydavky: number
+  /** Sum of all loan-related outflows this month (úvery + hypotéky + splátky). */
+  uveryTotal: number
+  /** Sum of mortgage outflows specifically (subset of uveryTotal). */
+  hypoteky: number
+  /** Configured monthly payment total from /hypoteky (reference, may differ). */
+  konfigSplatky: number
+  /** @deprecated use uveryTotal — kept for one release. */
   splatky: number
   net: number
   recent: RecentTx[]
@@ -131,7 +138,12 @@ export function Dashboard() {
 
   const p = summary?.prijmy ?? 0
   const v = summary?.vydavky ?? 0
-  const s = summary?.splatky ?? 0
+  // Splátky = všetky úvery z transakcií (úver + hypotéka + splátky kariet).
+  // Hypotéky = subset = len mortgage transakcie. Konfigurované je referenčné
+  // číslo z /hypoteky (čo si používateľ zadal ako mesačný plán).
+  const splatkyUverov = summary?.uveryTotal ?? 0
+  const hypoteky = summary?.hypoteky ?? 0
+  const konfigSplatky = summary?.konfigSplatky ?? 0
   const net = summary?.net ?? 0
   const months = summary?.months ?? []
   const monthLabel = formatMonth(summary?.month ?? month)
@@ -187,9 +199,15 @@ export function Dashboard() {
         </div>
         <div className="reveal reveal-4">
           <StatCard
-            label="Splátky / mesiac"
-            value={eur.format(s)}
-            hint={`${summary?.counts.mortgages ?? 0} úverov`}
+            label={`Splátky úverov (${monthLabel})`}
+            value={eur.format(splatkyUverov)}
+            hint={
+              splatkyUverov > 0
+                ? `z toho hypotéky: ${eur.format(hypoteky)}`
+                : konfigSplatky > 0
+                ? `plán z /hypoteky: ${eur.format(konfigSplatky)} · ešte nezaúčtované`
+                : `Z transakcií · pridaj /hypotéky pre plán`
+            }
             tone="cobalt"
             icon="⚱"
           />

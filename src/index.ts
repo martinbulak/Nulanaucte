@@ -127,7 +127,23 @@ app.get('/api/dashboard/summary', requireAuth, async (c) => {
   const vydavky = monthTxs
     .filter((t) => t.type === 'vydavok')
     .reduce((sum, t) => sum + t.amount, 0)
-  const splatky = mortgages.reduce((sum, m) => sum + m.monthlyPayment, 0)
+
+  // Splátky úverov v zvolenom mesiaci — počítané z TRANSAKCIÍ (čo skutočne
+  // odišlo z účtu), nie z /hypoteky tabuľky (čo si používateľ predpísal).
+  // Bezpečne pokryje: hypotéky, spotrebné úvery, leasing, splátka karty.
+  //
+  //   uveryTotal   = všetky výdavky s kategóriou obsahujúcou "úver"/"splát"/"hypoték"
+  //   hypotekyOnly = z toho len kategória "Hypotéka"
+  //   konfigSplatky = súčet monthlyPayment v /hypoteky (referenčné číslo)
+  const isLoanCategory = (cat: string) => /úver|splát|hypoték/i.test(cat)
+  const isMortgageCategory = (cat: string) => /hypoték/i.test(cat)
+  const uveryTotal = monthTxs
+    .filter((t) => t.type === 'vydavok' && isLoanCategory(t.category))
+    .reduce((sum, t) => sum + t.amount, 0)
+  const hypotekyZTransakcii = monthTxs
+    .filter((t) => t.type === 'vydavok' && isMortgageCategory(t.category))
+    .reduce((sum, t) => sum + t.amount, 0)
+  const konfigSplatky = mortgages.reduce((sum, m) => sum + m.monthlyPayment, 0)
 
   const recent = monthTxs.slice(0, 10).map((t) => {
     const bank = banks.find((b) => b.id === t.bankId)
@@ -153,7 +169,19 @@ app.get('/api/dashboard/summary', requireAuth, async (c) => {
       zostatok,
       prijmy: prijmyManual + prijmyImported,
       vydavky,
-      splatky,
+      /**
+       * Splátky úverov — actual outflows this month (sum of transactions
+       * categorised as anything matching "úver" / "splát" / "hypoték").
+       * Replaces the old `splatky` (which was mortgages.monthlyPayment sum
+       * and confused users — was 0 unless /hypoteky had entries).
+       */
+      uveryTotal,
+      hypoteky: hypotekyZTransakcii,
+      /** Reference number from /hypoteky configuration, kept for the breakdown. */
+      konfigSplatky,
+      // Deprecated alias — keep for one release so older frontend versions
+      // don't break before re-render.
+      splatky: uveryTotal,
       net: prijmyManual + prijmyImported - vydavky,
       recent,
       counts: {
