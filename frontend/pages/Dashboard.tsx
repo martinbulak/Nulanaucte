@@ -217,6 +217,16 @@ export function Dashboard() {
       {/* Top 6 výdavkových kategórií — hlavné kde miznú peniaze tento mesiac */}
       <TopCategoryTiles rows={catRows} totalSpend={v} className="mb-10 reveal reveal-5" />
 
+      {/* Category breakdown (current month) + Category trend (last 6 months).
+          Moved ABOVE the income-vs-expense bar chart so the user vidí najprv
+          „kam tečú peniaze" v rámci kategórií, potom „čistý cashflow". */}
+      <CategoryDashboardSection
+        monthLabel={monthLabel}
+        currentMonth={summary?.month}
+        catRows={catRows}
+        catTrend={catTrend}
+      />
+
       {/* Trend chart + bank breakdown */}
       {trend.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-10">
@@ -296,7 +306,7 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Raul — Veštba z Komnaty galeónov (top of fold once user has data) */}
+      {/* Raul — Veštba z Komnaty galeónov (po grafoch, pred posledným výpisom) */}
       {summary?.month && summary.counts.transactionsMonth > 0 && (
         <div className="mb-12 reveal reveal-6">
           <Card>
@@ -304,14 +314,6 @@ export function Dashboard() {
           </Card>
         </div>
       )}
-
-      {/* Category breakdown (current month) + Category trend (last 6 months) */}
-      <CategoryDashboardSection
-        monthLabel={monthLabel}
-        currentMonth={summary?.month}
-        catRows={catRows}
-        catTrend={catTrend}
-      />
 
       {/* Recent transactions — under the analysis sections */}
       <div className="mb-12 reveal reveal-6">
