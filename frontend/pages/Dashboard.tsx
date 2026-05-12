@@ -513,12 +513,12 @@ function TopCategoryTiles({
 
   return (
     <div className={className}>
-      <div className="flex items-baseline justify-between mb-3">
-        <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted">
+      <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+        <p className="font-heading text-xs uppercase tracking-widest text-text-secondary">
           ✦ Top {top.length} kategórií · kam tečú peniaze
         </p>
         {totalSpend > 0 && (
-          <p className="font-heading text-[0.6rem] uppercase tracking-widest text-text-muted">
+          <p className="font-heading text-xs uppercase tracking-widest text-text-secondary">
             celkové výdavky: <span className="text-crimson-bright">−{eur.format(totalSpend)}</span>
           </p>
         )}
@@ -532,19 +532,29 @@ function TopCategoryTiles({
               key={c.category}
               className={`relative bg-stone/50 border rounded-[3px] px-3 py-3 transition-all duration-200 ${tone.border}`}
             >
+              {/* Category name — bumped from 0.55rem to 0.72rem (~10→11.5px)
+                  + tracking-wider (not widest) so the same-row label fits
+                  more characters before truncating. */}
               <p
-                className={`font-heading text-[0.55rem] uppercase tracking-widest truncate ${tone.text}`}
+                className={`font-heading text-[0.72rem] uppercase tracking-wider truncate ${tone.text}`}
                 title={c.category}
               >
                 {c.category}
               </p>
-              <p className={`font-display text-xl mt-1 ${tone.text} leading-none`}>
+              <p className={`font-display text-xl mt-1.5 ${tone.text} leading-none`}>
                 {eur.format(c.total)}
               </p>
-              <p className="font-ui text-[10px] text-text-muted italic mt-1">
-                {c.count}× · {share}%
+              {/* Count + share — bumped to text-xs (12px) + dropped italic
+                  + use text-text-secondary (darker brown on cream) for proper
+                  contrast. Old "12× · 23%" was unreadable below 11px italic. */}
+              <p className="font-body text-xs text-text-secondary mt-1.5 flex items-center gap-1.5">
+                <span>{c.count}×</span>
+                <span className="text-text-muted">·</span>
+                <span className={`font-heading text-[0.7rem] tracking-wider ${tone.text}`}>
+                  {share}%
+                </span>
               </p>
-              <div className="mt-2 h-1 bg-stone/80 rounded-full overflow-hidden">
+              <div className="mt-2 h-1.5 bg-stone/80 rounded-full overflow-hidden">
                 <div
                   className={`h-full bg-gradient-to-r ${tone.bar}`}
                   style={{ width: `${share}%` }}
