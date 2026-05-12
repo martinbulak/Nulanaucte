@@ -4,6 +4,7 @@ import { apiFetch } from '../utils/api'
 export interface AuthUser {
   id: number
   email: string
+  name?: string | null
 }
 
 export function useAuth() {

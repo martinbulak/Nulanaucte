@@ -1,6 +1,7 @@
 import { NavLink, Link } from 'react-router-dom'
 import type { AuthUser } from '../../hooks/useAuth'
 import { BrandLogo } from '../ui/BrandLogo'
+import { FeedbackWidget } from '../ui/FeedbackWidget'
 
 interface NavItem {
   to: string
@@ -85,8 +86,8 @@ export function Sidebar({ user, onLogout }: Props) {
         )}
       </nav>
 
-      {/* User manual — above the theme toggle */}
-      <div className="px-4 py-3 border-t border-border-dim">
+      {/* User manual + feedback — stacked above user block */}
+      <div className="px-4 py-3 border-t border-border-dim space-y-2">
         <Link
           to="/navod"
           className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[3px] border border-border-dim text-text-secondary hover:border-gold hover:text-gold-bright hover:bg-gold/5 transition-all duration-300 group"
@@ -100,18 +101,36 @@ export function Sidebar({ user, onLogout }: Props) {
             ako to ovládať
           </span>
         </Link>
+        <FeedbackWidget />
       </div>
 
-      {/* User */}
+      {/* User — show name if set, otherwise fall back to email. Initial in
+          the avatar follows the displayed label so it stays consistent. */}
       <div className="px-4 py-5 border-t border-border-dim">
         <div className="flex items-center gap-3 px-2 py-2">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-gold-bright via-gold to-gold-dim flex items-center justify-center font-heading text-ink text-sm font-bold [box-shadow:0_0_16px_rgba(201,151,42,0.3)]">
-            {user.email.charAt(0).toUpperCase()}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="font-heading text-sm text-text-primary truncate">{user.email}</p>
-            <p className="font-ui text-xs text-text-muted">Strážca trezoru</p>
-          </div>
+          {(() => {
+            const displayName = (user.name && user.name.trim()) || user.email
+            const initial = displayName.charAt(0).toUpperCase()
+            const hasName = !!(user.name && user.name.trim())
+            return (
+              <>
+                <div
+                  className="w-9 h-9 rounded-full bg-gradient-to-br from-gold-bright via-gold to-gold-dim flex items-center justify-center font-heading text-ink text-sm font-bold [box-shadow:0_0_16px_rgba(201,151,42,0.3)]"
+                  title={user.email}
+                >
+                  {initial}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-heading text-sm text-text-primary truncate" title={user.email}>
+                    {displayName}
+                  </p>
+                  <p className="font-ui text-xs text-text-muted truncate">
+                    {hasName ? user.email : 'Strážca trezoru'}
+                  </p>
+                </div>
+              </>
+            )
+          })()}
         </div>
         <button
           onClick={onLogout}

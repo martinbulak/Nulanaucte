@@ -9,6 +9,7 @@ import { userRoutes } from './routes/user.js'
 import { aiRoutes } from './routes/ai.js'
 import { reportsRoutes } from './routes/reports.js'
 import { adminRoutes } from './routes/admin.js'
+import { feedbackRoutes } from './routes/feedback.js'
 import { requireAuth } from './middleware/auth.js'
 import {
   categorySummary,
@@ -61,6 +62,7 @@ app.route('/api/user', userRoutes)
 app.route('/api/ai', aiRoutes)
 app.route('/api/reports', reportsRoutes)
 app.route('/api/admin', adminRoutes)
+app.route('/api/feedback', feedbackRoutes)
 
 function parseMonth(raw: string | undefined): string | undefined {
   if (!raw) return undefined
