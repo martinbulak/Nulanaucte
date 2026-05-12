@@ -495,12 +495,27 @@ FORMÁT:
  * Generates Raul's recommendations as markdown for a given month.
  * Falls back to a deterministic stub if no OPENAI_API_KEY.
  */
+/** Reason the AI fallback fired — exposed so the UI can tell the user. */
+export type AiFallbackReason = 'no-key' | 'api-error' | 'empty-response'
+
+export interface RaulResult {
+  content: string
+  usedAI: boolean
+  fallbackReason?: AiFallbackReason
+  /** When AI errored, the raw message — exposed to logs only, never to the user. */
+  errorDetail?: string
+}
+
 export async function generateRecommendations(
   input: SpendingSummaryInput,
-): Promise<{ content: string; usedAI: boolean }> {
+): Promise<RaulResult> {
   const client = getClient()
   if (!client) {
-    return { content: stubRecommendations(input), usedAI: false }
+    return {
+      content: stubRecommendations(input, 'no-key'),
+      usedAI: false,
+      fallbackReason: 'no-key',
+    }
   }
 
   try {
@@ -537,11 +552,24 @@ Vyrob krátky komentár v Raulovom štýle.`,
       ],
     })
     const content = (res.choices[0]?.message?.content ?? '').trim()
-    if (!content) return { content: stubRecommendations(input), usedAI: false }
+    if (!content) {
+      console.warn('[ai] raul returned empty content, using stub')
+      return {
+        content: stubRecommendations(input, 'empty-response'),
+        usedAI: false,
+        fallbackReason: 'empty-response',
+      }
+    }
     return { content, usedAI: true }
   } catch (e) {
-    console.error('[ai] raul failed, falling back to stub:', e instanceof Error ? e.message : e)
-    return { content: stubRecommendations(input), usedAI: false }
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[ai] raul failed, falling back to stub:', msg)
+    return {
+      content: stubRecommendations(input, 'api-error'),
+      usedAI: false,
+      fallbackReason: 'api-error',
+      errorDetail: msg.slice(0, 200),
+    }
   }
 }
 
@@ -585,12 +613,20 @@ PRÍKLADY GOOD (drž sa tohto vibe, ALE tip má byť 1-2 vety, nie len jeden ús
 - "Auto-servis 380 €. Buď pravidelne po 60 €, alebo veľa naraz po 400 €. Vyber si rytmus, motor je trpezlivý len zdanlivo."
 - "Streaming 47 €. Netflix + HBO + Disney+. Konzument storočia, ale spánok je tiež obsah a netreba predplatné."`
 
+export interface ClippyResult {
+  tips: string[]
+  usedAI: boolean
+  tokens?: number
+  fallbackReason?: AiFallbackReason
+  errorDetail?: string
+}
+
 export async function generateClippyTips(
   input: SpendingSummaryInput,
-): Promise<{ tips: string[]; usedAI: boolean; tokens?: number }> {
+): Promise<ClippyResult> {
   const client = getClient()
   if (!client) {
-    return { tips: stubClippyTips(input), usedAI: false }
+    return { tips: stubClippyTips(input), usedAI: false, fallbackReason: 'no-key' }
   }
 
   try {
@@ -637,14 +673,24 @@ Vyrob presne 12 krátkych vtipných tipov.`,
       // before truncating; below 5 chars is garbage).
       .filter((t) => t.length > 5 && t.length <= 220)
       .slice(0, 15)
-    if (tips.length === 0) return { tips: stubClippyTips(input), usedAI: false }
+    if (tips.length === 0) {
+      console.warn('[ai] clippy tips returned empty list, using stub')
+      return {
+        tips: stubClippyTips(input),
+        usedAI: false,
+        fallbackReason: 'empty-response',
+      }
+    }
     return { tips, usedAI: true, tokens: res.usage?.total_tokens ?? 0 }
   } catch (e) {
-    console.error(
-      '[ai] clippy tips failed, using stub:',
-      e instanceof Error ? e.message : e,
-    )
-    return { tips: stubClippyTips(input), usedAI: false }
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[ai] clippy tips failed, using stub:', msg)
+    return {
+      tips: stubClippyTips(input),
+      usedAI: false,
+      fallbackReason: 'api-error',
+      errorDetail: msg.slice(0, 200),
+    }
   }
 }
 
@@ -673,15 +719,18 @@ function stubClippyTips(input: SpendingSummaryInput): string[] {
       `${c.category} ${c.pct > 0 ? '↑' : '↓'} ${Math.abs(c.pct).toFixed(0)} % oproti minulému mesiacu.`,
     )
   }
-  out.push('Pre živé vtipné tipy nastav OPENAI_API_KEY. Toto je len ukážka.')
+  out.push('Toto sú rule-based náhradné tipy. Klikni „Vygenerovať znovu" v Raul paneli pre živé AI tipy.')
   return out
 }
 
-function stubRecommendations(input: SpendingSummaryInput): string {
+function stubRecommendations(
+  input: SpendingSummaryInput,
+  reason: AiFallbackReason = 'no-key',
+): string {
   const top = input.topCategories[0]
   const bilancia = input.totalIncome - input.totalExpense
   const lines: string[] = []
-  lines.push(`**Raul si pozrel ${input.monthLabel}** (offline mód, žiadny AI):`)
+  lines.push(`**Raul si pozrel ${input.monthLabel}** (offline mód, žiadne AI volanie):`)
   lines.push('')
   if (bilancia >= 0) {
     lines.push(`- Bilancia ${bilancia.toFixed(0)} € v pluse — Apparátor sa neusmieva, ale ani nezúri.`)
@@ -699,8 +748,18 @@ function stubRecommendations(input: SpendingSummaryInput): string {
     }
   }
   lines.push('')
-  lines.push(
-    '_Pre živé Raulove odporúčania nastav `OPENAI_API_KEY` v env. Toto je len ukážka._',
-  )
+  if (reason === 'no-key') {
+    lines.push(
+      '_OPENAI_API_KEY nie je nastavený v env — toto je rule-based náhrada. Nastav kľúč v Vercel Settings → Environment Variables a redeploy, potom klikni „Vygenerovať znovu"._',
+    )
+  } else if (reason === 'api-error') {
+    lines.push(
+      '_AI volanie zlyhalo (sieť, kvóta, neplatný kľúč alebo iný problém s OpenAI). Pozri Vercel logs pre detail a klikni „Vygenerovať znovu" za chvíľu._',
+    )
+  } else {
+    lines.push(
+      '_OpenAI vrátil prázdnu odpoveď. Skús „Vygenerovať znovu" — pravdepodobne to vyšumie._',
+    )
+  }
   return lines.join('\n')
 }

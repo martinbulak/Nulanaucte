@@ -403,7 +403,19 @@ aiRoutes.post('/recommendations', aiExpensiveLimit, async (c) => {
     largestTransactions,
   }
   const result = await generateRecommendations(summaryInput)
-  await saveRecommendation(user.id, month, result.content)
+
+  // Only cache REAL AI content. If the call fell back to a stub (no key /
+  // API error / empty response), we still return the stub text to the user
+  // for transparency — but don't pollute the DB. Next "Vygenerovať znovu"
+  // will try the live API again.
+  if (result.usedAI) {
+    await saveRecommendation(user.id, month, result.content)
+  } else {
+    console.warn(
+      `[ai] Raul stub used for user=${user.id} month=${month} reason=${result.fallbackReason}` +
+        (result.errorDetail ? ` detail=${result.errorDetail}` : ''),
+    )
+  }
 
   // Side-effect: refresh the clippy tips for the SAME month using the SAME
   // dashboard input. Different prompt, separate OpenAI call (~$0.0005), but
@@ -411,14 +423,22 @@ aiRoutes.post('/recommendations', aiExpensiveLimit, async (c) => {
   // cost is part of that explicit action. Mascot tips stay in sync with the
   // long-form Raul recommendation the user just regenerated.
   let clippyCount = 0
+  let clippyUsedAi = false
+  let clippyFallbackReason: typeof result.fallbackReason = undefined
   try {
     const clippy = await generateClippyTips(summaryInput)
-    if (clippy.tips.length > 0) {
+    if (clippy.usedAI && clippy.tips.length > 0) {
       await saveClippyTips(user.id, month, clippy.tips)
       clippyCount = clippy.tips.length
+    } else if (clippy.fallbackReason) {
+      console.warn(
+        `[ai] Clippy stub used for user=${user.id} month=${month} reason=${clippy.fallbackReason}` +
+          (clippy.errorDetail ? ` detail=${clippy.errorDetail}` : ''),
+      )
     }
+    clippyUsedAi = clippy.usedAI
+    clippyFallbackReason = clippy.fallbackReason
   } catch (e) {
-    // Non-fatal — Raul rec already saved. Just log and move on.
     console.warn('[ai] clippy refresh failed:', e instanceof Error ? e.message : e)
   }
 
@@ -428,7 +448,10 @@ aiRoutes.post('/recommendations', aiExpensiveLimit, async (c) => {
       period: month,
       content: result.content,
       usedAI: result.usedAI,
+      fallbackReason: result.fallbackReason ?? null,
       clippyTips: clippyCount,
+      clippyUsedAi,
+      clippyFallbackReason: clippyFallbackReason ?? null,
     },
   })
 })

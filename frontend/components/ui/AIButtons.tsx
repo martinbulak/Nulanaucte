@@ -181,10 +181,16 @@ interface RaulData {
   recommendation: { content: string; createdAt: string } | null
 }
 
+type AiFallbackReason = 'no-key' | 'api-error' | 'empty-response'
+
 interface RaulResult {
   period: string
   content: string
   usedAI: boolean
+  fallbackReason: AiFallbackReason | null
+  clippyTips: number
+  clippyUsedAi: boolean
+  clippyFallbackReason: AiFallbackReason | null
 }
 
 type RaulPhase = 'idle' | 'loading' | 'analyzing' | 'writing' | 'done' | 'error'
@@ -201,6 +207,7 @@ export function RaulPanel({ month }: { month: string }) {
   const [data, setData] = useState<RaulData | null>(null)
   const [phase, setPhase] = useState<RaulPhase>('loading')
   const [usedAI, setUsedAI] = useState<boolean | null>(null)
+  const [fallbackReason, setFallbackReason] = useState<AiFallbackReason | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [err, setErr] = useState<string | null>(null)
 
@@ -248,6 +255,7 @@ export function RaulPanel({ month }: { month: string }) {
       recommendation: { content: res.data.content, createdAt: new Date().toISOString() },
     })
     setUsedAI(res.data.usedAI)
+    setFallbackReason(res.data.fallbackReason)
     setPhase('done')
   }
 
@@ -287,6 +295,36 @@ export function RaulPanel({ month }: { month: string }) {
       {err && (
         <div className="bg-crimson/10 border border-crimson/30 border-l-[3px] border-l-crimson-bright rounded-[3px] px-4 py-3 mb-4">
           <p className="font-body text-sm text-text-secondary">{err}</p>
+        </div>
+      )}
+
+      {/* Fallback warning — when last generation returned a rule-based stub.
+          Tells the user WHY so they can fix it (mostly: regenerate after
+          adding/redeploying the OPENAI_API_KEY). */}
+      {usedAI === false && fallbackReason && (
+        <div className="bg-crimson/10 border border-crimson/30 border-l-[3px] border-l-crimson-bright rounded-[3px] px-4 py-3 mb-4">
+          <p className="font-heading text-[0.65rem] uppercase tracking-widest text-crimson-bright mb-1">
+            ⚠ AI volanie zlyhalo — toto je rule-based náhrada
+          </p>
+          <p className="font-body text-sm text-text-secondary">
+            {fallbackReason === 'no-key' && (
+              <>
+                Server neviem nájsť <code className="font-mono text-xs text-gold">OPENAI_API_KEY</code> v env premenných.
+                Nastav ho vo Vercel Project Settings → Environment Variables → <strong>Redeploy</strong>, potom klikni „Vygenerovať znovu".
+              </>
+            )}
+            {fallbackReason === 'api-error' && (
+              <>
+                OpenAI volanie spadlo (sieť, kvóta, neplatný kľúč, alebo iný problém na ich strane). Pozri Vercel Logs pre detail.
+                Skús „Vygenerovať znovu" o chvíľu — najčastejšie to vyšumie.
+              </>
+            )}
+            {fallbackReason === 'empty-response' && (
+              <>
+                OpenAI vrátil prázdnu odpoveď. Skús „Vygenerovať znovu" — typicky to prejde napodruhý.
+              </>
+            )}
+          </p>
         </div>
       )}
 
