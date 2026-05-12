@@ -58,6 +58,12 @@ export async function ensureSeeded(): Promise<void> {
     CREATE INDEX IF NOT EXISTS merchant_rules_user_idx
       ON merchant_rules(user_id)
   `)
+  // Column added in v0.5 — AI-extracted merchant identifier per transaction.
+  // Useful both for display (cleaner than raw note) and for unifying rule
+  // matching across slightly different note variants of the same merchant.
+  await db.execute(sqlOp`
+    ALTER TABLE transactions ADD COLUMN IF NOT EXISTS merchant TEXT
+  `)
 
   // Check whether the seed user already exists (case-insensitive)
   const existing = await findUserByEmail('koduvanica')
@@ -254,6 +260,7 @@ function rowToTransaction(r: typeof transactions.$inferSelect): Transaction {
     fingerprint: r.fingerprint,
     aiConfidence: r.aiConfidence ?? null,
     categorizedBy: r.categorizedBy as CategorizedBy,
+    merchant: r.merchant ?? null,
     createdAt: r.createdAt.toISOString(),
   }
 }
@@ -391,6 +398,8 @@ export interface CategoryUpdate {
   category: string
   aiConfidence?: number | null
   source: CategorizedBy
+  /** Optional AI-extracted merchant identifier; only set on AI categorisation. */
+  merchant?: string | null
 }
 
 /** Bulk-update categories for many transactions (one per query, but batched). */
@@ -400,13 +409,17 @@ export async function applyCategoryUpdates(
 ): Promise<number> {
   let count = 0
   for (const u of updates) {
+    const patch: Record<string, unknown> = {
+      category: u.category.slice(0, 80),
+      aiConfidence: u.aiConfidence ?? null,
+      categorizedBy: u.source,
+    }
+    if (u.merchant !== undefined) {
+      patch.merchant = u.merchant ? u.merchant.slice(0, 80) : null
+    }
     const r = await db
       .update(transactions)
-      .set({
-        category: u.category.slice(0, 80),
-        aiConfidence: u.aiConfidence ?? null,
-        categorizedBy: u.source,
-      })
+      .set(patch)
       .where(and(eq(transactions.userId, userId), eq(transactions.id, u.id)))
       .returning({ id: transactions.id })
     count += r.length
@@ -526,9 +539,15 @@ export async function upsertMerchantRule(input: {
 }
 
 /**
- * Bulk-apply rules to a set of transactions. For each tx whose merchantKey()
- * matches a known rule, update its category directly and return the matched
- * ids so the caller can skip those txs in the AI batch.
+ * Bulk-apply rules to a set of transactions. For each tx we try two key
+ * variants in order of specificity:
+ *   1. `merchant:<lowercased AI-extracted name>` — strongest signal, unifies
+ *      different store locations of the same chain (Tesco Petržalka == Tesco BA).
+ *   2. `iban:...` or normalized-note key — falls back when no merchant is set
+ *      yet (e.g. brand-new tx that hasn't been through AI).
+ *
+ * Returns the set of transaction ids that were updated by rules so the
+ * caller can skip them in the AI batch.
  */
 export async function applyRulesToTransactions(
   userId: number,
@@ -539,9 +558,16 @@ export async function applyRulesToTransactions(
   const ruleMap = new Map(rules.map((r) => [r.key, r]))
   const updates: Array<{ id: number; category: string; confidence: number | null }> = []
   for (const t of txs) {
-    const k = merchantKey(t.note)
-    if (!k) continue
-    const rule = ruleMap.get(k)
+    // 1) Merchant-based lookup (strongest)
+    let rule: MerchantRule | undefined
+    if (t.merchant && t.merchant.length >= 2) {
+      rule = ruleMap.get(`merchant:${t.merchant.toLowerCase()}`)
+    }
+    // 2) Fall back to note-based lookup
+    if (!rule) {
+      const k = merchantKey(t.note)
+      if (k) rule = ruleMap.get(k)
+    }
     if (rule) updates.push({ id: t.id, category: rule.category, confidence: rule.confidence })
   }
   if (updates.length === 0) return new Set()

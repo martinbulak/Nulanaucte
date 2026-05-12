@@ -105,6 +105,9 @@ export const transactions = pgTable(
     // AI categorization metadata
     aiConfidence: doublePrecision('ai_confidence'),
     categorizedBy: text('categorized_by').notNull().default('system'), // 'system' | 'ai' | 'user'
+    // AI-extracted merchant identifier (clean company name like "Tesco", "BTS Airport").
+    // Nullable — only populated after AI categorisation runs.
+    merchant: text('merchant'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

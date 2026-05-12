@@ -52,15 +52,45 @@ export interface CategorizedTx {
   id: number
   category: Category
   confidence: number // 0..1
+  /**
+   * AI-extracted merchant identifier (e.g. "Tesco", "BTS Airport", "Slovnaft").
+   * Cleaner than the raw note — usable for display, grouping, and as a stable
+   * rule key (multiple notes from the same chain → same merchant → same rule).
+   * Empty string if AI couldn't extract one.
+   */
+  merchant: string
+}
+
+/**
+ * Best-effort merchant guess from the raw note when AI is unavailable.
+ * Picks the first run of "wordy" uppercase letters after stripping the usual
+ * bank prefixes — works ~80 % of the time for SK PDFs.
+ */
+function guessMerchantFromNote(note: string): string {
+  if (!note) return ''
+  let s = note
+    // Drop common SK bank prefixes
+    .replace(/^(platba kartou|platba|prevod (z|na|na účet)|úhrada|inkaso)/i, '')
+    // Drop dates/times/refs/amounts
+    .replace(/\b\d{2}[./-]\d{2}([./-]\d{2,4})?\b/g, ' ')
+    .replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, ' ')
+    .replace(/\b(ref|vs|ks|ss)[:.]? ?\d+/gi, ' ')
+    .replace(/\b\d+[.,]\d{2} ?(eur|€|czk|usd)?\b/gi, ' ')
+    .trim()
+  // Take the first meaningful word/two — usually the merchant name in caps.
+  const m = s.match(/[A-Za-zÀ-žÄ-ž][\wÀ-žÄ-ž.\-&]{1,30}(?: [A-Za-zÀ-žÄ-ž][\wÀ-žÄ-ž.\-&]{1,20})?/)
+  if (!m) return ''
+  return m[0].slice(0, 40).trim()
 }
 
 /** Rule-based fallback that runs in dev when no OPENAI_API_KEY is set. */
 function ruleBased(tx: TxToCategorize): CategorizedTx {
   const note = tx.note.toLowerCase()
+  const merchant = guessMerchantFromNote(tx.note)
   if (tx.type === 'prijem') {
     if (/mzda|výplata|vyplata|salary|payroll|dividend/i.test(note))
-      return { id: tx.id, category: 'Príjem', confidence: 0.85 }
-    return { id: tx.id, category: 'Príjem', confidence: 0.5 }
+      return { id: tx.id, category: 'Príjem', confidence: 0.85, merchant }
+    return { id: tx.id, category: 'Príjem', confidence: 0.5, merchant }
   }
   // Výdavky — heuristics (more specific patterns FIRST, broader ones later)
   const map: Array<[RegExp, Category, number]> = [
@@ -114,20 +144,34 @@ function ruleBased(tx: TxToCategorize): CategorizedTx {
     [/(unicef|červený kríž|cerveny kriz|charita|dobročinnosť|dobrocinnost)/i, 'Charita', 0.9],
   ]
   for (const [re, cat, conf] of map) {
-    if (re.test(note)) return { id: tx.id, category: cat, confidence: conf }
+    if (re.test(note)) return { id: tx.id, category: cat, confidence: conf, merchant }
   }
-  return { id: tx.id, category: 'Iné', confidence: 0.3 }
+  return { id: tx.id, category: 'Iné', confidence: 0.3, merchant }
 }
 
 const SYSTEM_PROMPT = `Si finančný asistent appky "Nula na účte". Tvoja jediná úloha: pri každej transakcii ROZHODNE priradiť slovenský label kategórie podľa toho čo v popise skutočne vidíš.
 
 ZÁKLADNÉ PRAVIDLÁ:
-- Vráť LEN platný JSON: {"items":[{"id":1,"category":"Potraviny","confidence":0.95}, ...]}
+- Vráť LEN platný JSON: {"items":[{"id":1,"merchant":"Tesco","category":"Potraviny","confidence":0.95}, ...]}
+- "merchant" = vyčistený názov obchodu/firmy (1–3 slová), tak ako by ho užívateľ rozpoznal: "Tesco", "BTS Airport", "Slovnaft", "Bolt", "Mzda", "Netflix". Bez prefixov "PLATBA KARTOU", bez ref čísel, bez dátumov. Max 40 znakov.
 - "category" = 1–3 slová po slovensky, prvé písmeno veľké (max 50 znakov).
 - "confidence" = 0..1.
-- Buď KONZISTENTNÝ: rovnaký obchod / podobné transakcie → rovnaký label v celej dávke.
+- Buď KONZISTENTNÝ: rovnaký obchod / podobné transakcie → rovnaký merchant + rovnaký label v celej dávke.
 - Ignoruj ID ktoré nemáš v inpute.
 - Žiadny iný text mimo JSON, žiadny markdown, žiadne komentáre.
+
+MERCHANT EXTRAKCIA — myšlienkový postup:
+1. Pozri sa na celý note. Strip "Platba kartou", "Prevod z účtu", dátum, ref/VS čísla, sumu.
+2. Čo ostane = názov obchodu alebo služby. Napr.:
+   - "Platba kartou TESCO PETRZALKA 12.34 EUR 04.05" → merchant: "Tesco"
+   - "PREVOD NA ÚČET 04.05 BTS.AERO 6.00 EUR REF:12345" → merchant: "BTS Airport"
+   - "STARBUCKS BRATISLAVA" → merchant: "Starbucks"
+   - "Platba O2 SLOVAKIA mes.poplat." → merchant: "O2"
+   - "MZDA OD BOOSTERS sro 04/26" → merchant: "Boosters"
+3. Normalizuj na ČISTÉ obchodné meno. Bez lokality, bez "kartou", bez "platba".
+4. Ak je to neidentifikovateľné → merchant: "" (prázdny string).
+
+Pravidlo: rovnaký obchod v rôznych mestách (Tesco Petržalka, Tesco Bratislava) musí mať RÔVNAKÝ merchant ("Tesco"). To umožňuje appke pamätať si tvoju kategorizáciu naprieč pobočkami.
 
 DÔLEŽITÉ — KATEGÓRIA "Iné" JE POSLEDNÁ MOŽNOSŤ:
 - "Iné" používaj IBA ak naozaj absolútne nemáš ako pochopiť čo to je (napr. iba "Platba kartou 12.34 EUR" bez žiadneho ďalšieho kontextu).
@@ -260,7 +304,9 @@ async function aiCategorizeOne(
     ],
   })
   const raw = res.choices[0]?.message?.content ?? '{"items":[]}'
-  const parsed = JSON.parse(raw) as { items?: Array<{ id?: number; category?: string; confidence?: number }> }
+  const parsed = JSON.parse(raw) as {
+    items?: Array<{ id?: number; category?: string; confidence?: number; merchant?: string }>
+  }
   const items: CategorizedTx[] = []
   if (Array.isArray(parsed.items)) {
     for (const it of parsed.items) {
@@ -272,7 +318,12 @@ async function aiCategorizeOne(
       // Capitalize first letter for consistency
       const normalized = cat.charAt(0).toUpperCase() + cat.slice(1)
       const conf = typeof it.confidence === 'number' ? Math.max(0, Math.min(1, it.confidence)) : 0.5
-      items.push({ id: it.id, category: normalized, confidence: conf })
+      // Merchant — optional. Normalise: trim, collapse whitespace, cap at 40 chars.
+      let merchant = ''
+      if (typeof it.merchant === 'string') {
+        merchant = it.merchant.trim().replace(/\s+/g, ' ').slice(0, 40)
+      }
+      items.push({ id: it.id, category: normalized, confidence: conf, merchant })
     }
   }
   return { items, tokens: res.usage?.total_tokens ?? 0 }

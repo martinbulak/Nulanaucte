@@ -71,6 +71,8 @@ export interface Transaction {
   fingerprint: string | null
   aiConfidence: number | null
   categorizedBy: CategorizedBy
+  /** AI-extracted clean merchant identifier (e.g. "Tesco", "BTS Airport"). */
+  merchant: string | null
   createdAt: string
 }
 

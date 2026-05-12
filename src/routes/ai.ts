@@ -116,30 +116,48 @@ aiRoutes.post('/categorize', async (c) => {
     const result = await categorizeBatch(minimal)
     usedAI = result.usedAI
     tokens = result.tokens ?? 0
+    // Persist category + AI-extracted merchant on each tx.
     const updates = result.items.map((it) => ({
       id: it.id,
       category: it.category,
       aiConfidence: it.confidence,
       source: 'ai' as const,
+      // Empty merchant → null (clear any stale value); non-empty → save.
+      merchant: it.merchant && it.merchant.length > 0 ? it.merchant : null,
     }))
     aiUpdated = await applyCategoryUpdates(user.id, updates)
     // STEP 3 — Persist high-confidence AI categorizations as rules so future
-    // transactions from the same merchant skip AI on next run. Only confident
-    // ones (≥0.7) and skip "Iné" — we don't want to memoize a fallback.
+    // transactions skip AI on next run. We save TWO rule variants per item:
+    //   - note-keyed (existing behaviour: matches near-identical note text)
+    //   - merchant-keyed (NEW: matches by AI-extracted company name across
+    //     different store locations / note phrasings)
+    // Skip "Iné" and low-confidence — we don't want to memoize a fallback.
     for (const it of result.items) {
       if ((it.confidence ?? 0) < 0.7) continue
       if (it.category.toLowerCase() === 'iné') continue
       const sourceTx = remaining.find((t) => t.id === it.id)
       if (!sourceTx) continue
-      const k = merchantKey(sourceTx.note)
-      if (!k) continue
-      await upsertMerchantRule({
-        userId: user.id,
-        key: k,
-        category: it.category,
-        confidence: it.confidence,
-        source: 'ai',
-      })
+      const noteKey = merchantKey(sourceTx.note)
+      if (noteKey) {
+        await upsertMerchantRule({
+          userId: user.id,
+          key: noteKey,
+          category: it.category,
+          confidence: it.confidence,
+          source: 'ai',
+        })
+      }
+      if (it.merchant && it.merchant.length >= 2) {
+        // merchant: prefix so we know it's the AI-extracted company name, not
+        // a normalized-note key. Distinct namespace inside the same table.
+        await upsertMerchantRule({
+          userId: user.id,
+          key: `merchant:${it.merchant.toLowerCase()}`,
+          category: it.category,
+          confidence: it.confidence,
+          source: 'ai',
+        })
+      }
     }
   }
 
@@ -178,15 +196,29 @@ aiRoutes.patch('/transactions/:id/category', async (c) => {
   ])
   if (updated === 0) return c.json({ ok: false, error: 'Transakcia nenájdená' }, 404)
 
-  // Memorize the user's choice as a merchant rule so future imports from the
-  // same merchant/IBAN are categorized automatically before AI even sees them.
+  // Memorize the user's choice as one or two merchant rules so future imports
+  // from the same merchant / IBAN are categorized automatically before AI
+  // even sees them. We save both variants when available:
+  //   - note-keyed: matches near-identical note text on future txs
+  //   - merchant-keyed: matches across different store locations of the same
+  //     chain (Tesco Petržalka == Tesco Bratislava). Requires AI to have
+  //     previously extracted a merchant on this tx.
   try {
     const tx = await findTransactionById(user.id, id)
-    const k = merchantKey(tx?.note)
-    if (k) {
+    const noteKey = merchantKey(tx?.note)
+    if (noteKey) {
       await upsertMerchantRule({
         userId: user.id,
-        key: k,
+        key: noteKey,
+        category: cat,
+        confidence: null,
+        source: 'user',
+      })
+    }
+    if (tx?.merchant && tx.merchant.length >= 2) {
+      await upsertMerchantRule({
+        userId: user.id,
+        key: `merchant:${tx.merchant.toLowerCase()}`,
         category: cat,
         confidence: null,
         source: 'user',

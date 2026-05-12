@@ -131,6 +131,9 @@ app.get('/api/dashboard/summary', requireAuth, async (c) => {
       amount: t.amount,
       note: t.note,
       category: t.category,
+      categorizedBy: t.categorizedBy,
+      aiConfidence: t.aiConfidence,
+      merchant: t.merchant,
       bankName: bank?.name ?? null,
     }
   })

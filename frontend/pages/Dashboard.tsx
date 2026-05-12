@@ -13,6 +13,7 @@ import {
   type CategoryTrendPoint,
 } from '../components/ui/Charts'
 import { RaulPanel } from '../components/ui/AIButtons'
+import { CategorySelect } from '../components/ui/CategorySelect'
 import { apiFetch } from '../utils/api'
 
 interface CategoryRow {
@@ -34,6 +35,9 @@ interface RecentTx {
   amount: number
   note: string | null
   category: string
+  categorizedBy?: 'system' | 'ai' | 'user'
+  aiConfidence?: number | null
+  merchant?: string | null
   bankName: string | null
 }
 
@@ -78,8 +82,16 @@ export function Dashboard() {
   const [trend, setTrend] = useState<TrendPoint[]>([])
   const [catTrend, setCatTrend] = useState<CategoryTrend | null>(null)
   const [catRows, setCatRows] = useState<CategoryRow[]>([])
+  const [categories, setCategories] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [month, setMonth] = useState<string>(currentYearMonth())
+
+  // Category combobox source — load once, refreshes on manual save inside <CategorySelect>.
+  useEffect(() => {
+    apiFetch<{ categories: string[] }>('/api/ai/categories').then((res) => {
+      if (res.ok && res.data.categories.length > 0) setCategories(res.data.categories)
+    })
+  }, [])
 
   const load = useCallback(async (m: string) => {
     const [sumRes, trendRes, catTrendRes, catRowsRes] = await Promise.all([
@@ -108,7 +120,6 @@ export function Dashboard() {
   // Compute current-month bank breakdown from recent transactions
   // (fast — for full breakdown user goes to /vydavky)
 
-  const z = summary?.zostatok ?? 0
   const p = summary?.prijmy ?? 0
   const v = summary?.vydavky ?? 0
   const s = summary?.splatky ?? 0
@@ -143,18 +154,11 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* 4 Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
+      {/* 3 Stat Cards — Príjmy / Výdavky / Splátky.
+          Zostatok bol zámerne odstránený — live bank balance nemáme, len importované zostatky,
+          ktoré by zavádzali. Užívateľ uvidí čistý cashflow. */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
         <div className="reveal reveal-2">
-          <StatCard
-            label="Zostatok v trezoroch"
-            value={eur.format(z)}
-            hint={`${summary?.counts.banks ?? 0} bánk · aktuálny`}
-            tone="gold"
-            icon="⚖"
-          />
-        </div>
-        <div className="reveal reveal-3">
           <StatCard
             label={`Príjmy (${monthLabel})`}
             value={eur.format(p)}
@@ -163,7 +167,7 @@ export function Dashboard() {
             icon="⚜"
           />
         </div>
-        <div className="reveal reveal-4">
+        <div className="reveal reveal-3">
           <StatCard
             label={`Výdavky (${monthLabel})`}
             value={eur.format(v)}
@@ -172,7 +176,7 @@ export function Dashboard() {
             icon="☥"
           />
         </div>
-        <div className="reveal reveal-5">
+        <div className="reveal reveal-4">
           <StatCard
             label="Splátky / mesiac"
             value={eur.format(s)}
@@ -182,6 +186,9 @@ export function Dashboard() {
           />
         </div>
       </div>
+
+      {/* Top 6 výdavkových kategórií — hlavné kde miznú peniaze tento mesiac */}
+      <TopCategoryTiles rows={catRows} totalSpend={v} className="mb-10 reveal reveal-5" />
 
       {/* Trend chart + bank breakdown */}
       {trend.length > 0 && (
@@ -346,20 +353,30 @@ export function Dashboard() {
                       <td className="px-4 py-2.5 text-text-secondary text-sm whitespace-nowrap">
                         {t.date}
                       </td>
-                      <td className="px-4 py-2.5 text-text-primary text-sm truncate max-w-md">
-                        {t.note || '—'}
+                      <td className="px-4 py-2.5 text-text-primary text-sm max-w-md">
+                        {t.merchant ? (
+                          <>
+                            <span className="block font-heading text-text-primary truncate">
+                              {t.merchant}
+                            </span>
+                            <span
+                              className="block font-ui italic text-[10px] text-text-muted truncate mt-0.5"
+                              title={t.note ?? ''}
+                            >
+                              {t.note || '—'}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="block truncate">{t.note || '—'}</span>
+                        )}
                       </td>
-                      <td className="px-4 py-2.5 text-xs whitespace-nowrap">
-                        <span
-                          className={[
-                            'font-heading uppercase tracking-widest border px-2 py-0.5 rounded-[2px]',
-                            t.category === 'Nezaradené' || t.category === 'Iné'
-                              ? 'text-text-muted border-border-dim bg-stone/40'
-                              : 'text-gold border-gold/30 bg-gold/10',
-                          ].join(' ')}
-                        >
-                          {t.category}
-                        </span>
+                      <td className="px-4 py-2.5 text-text-secondary text-sm">
+                        <CategorySelect
+                          tx={t}
+                          options={categories}
+                          size="compact"
+                          onChange={() => load(month)}
+                        />
                       </td>
                       <td className="px-4 py-2.5 text-text-muted text-xs italic">
                         {t.bankName || '—'}
@@ -419,6 +436,98 @@ export function Dashboard() {
 // BankBreakdown — derives top spending banks from the recent tx list
 // included in the dashboard summary (no extra fetch needed).
 // ----------------------------------------------------------------
+
+// ----------------------------------------------------------------
+// TopCategoryTiles — six mini stat-style tiles at the top of the dashboard
+// showing the biggest expense categories for the picked month. Replaces
+// the old "Zostatok" card (we don't have live bank balance anyway).
+// ----------------------------------------------------------------
+
+const TILE_TONES = [
+  { text: 'text-gold-bright', border: 'border-gold/30 hover:border-gold-bright', bar: 'from-gold-dim via-gold to-gold-bright' },
+  { text: 'text-crimson-bright', border: 'border-crimson/30 hover:border-crimson-bright', bar: 'from-crimson via-crimson-bright to-crimson-bright' },
+  { text: 'text-cobalt-bright', border: 'border-cobalt/30 hover:border-cobalt-bright', bar: 'from-cobalt via-cobalt-bright to-cobalt-bright' },
+  { text: 'text-emerald-bright', border: 'border-emerald-bright/30 hover:border-emerald-bright', bar: 'from-emerald via-emerald-bright to-emerald-bright' },
+  { text: 'text-gold', border: 'border-gold-dim/30 hover:border-gold', bar: 'from-gold-dim via-gold to-gold' },
+  { text: 'text-text-secondary', border: 'border-border-dim hover:border-gold-dim', bar: 'from-text-muted via-text-secondary to-text-secondary' },
+]
+
+function TopCategoryTiles({
+  rows,
+  totalSpend,
+  className = '',
+}: {
+  rows: CategoryRow[]
+  totalSpend: number
+  className?: string
+}) {
+  // Skip empty + "Nezaradené" buckets, take top 6 by spend.
+  const top = rows
+    .filter((r) => r.category !== 'Nezaradené' && r.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 6)
+
+  if (top.length === 0) {
+    return (
+      <div className={className}>
+        <Card>
+          <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted mb-1">
+            ✦ Najväčšie kategórie výdavkov
+          </p>
+          <p className="font-ui italic text-text-muted text-sm">
+            Importuj výpis alebo počkaj na AI kategorizáciu — zatiaľ nemáme kam kategórie zaradiť.
+          </p>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className={className}>
+      <div className="flex items-baseline justify-between mb-3">
+        <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted">
+          ✦ Top {top.length} kategórií · kam tečú peniaze
+        </p>
+        {totalSpend > 0 && (
+          <p className="font-heading text-[0.6rem] uppercase tracking-widest text-text-muted">
+            celkové výdavky: <span className="text-crimson-bright">−{eur.format(totalSpend)}</span>
+          </p>
+        )}
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {top.map((c, i) => {
+          const tone = TILE_TONES[i % TILE_TONES.length]
+          const share = totalSpend > 0 ? Math.round((c.total / totalSpend) * 100) : 0
+          return (
+            <div
+              key={c.category}
+              className={`relative bg-stone/50 border rounded-[3px] px-3 py-3 transition-all duration-200 ${tone.border}`}
+            >
+              <p
+                className={`font-heading text-[0.55rem] uppercase tracking-widest truncate ${tone.text}`}
+                title={c.category}
+              >
+                {c.category}
+              </p>
+              <p className={`font-display text-xl mt-1 ${tone.text} leading-none`}>
+                {eur.format(c.total)}
+              </p>
+              <p className="font-ui text-[10px] text-text-muted italic mt-1">
+                {c.count}× · {share}%
+              </p>
+              <div className="mt-2 h-1 bg-stone/80 rounded-full overflow-hidden">
+                <div
+                  className={`h-full bg-gradient-to-r ${tone.bar}`}
+                  style={{ width: `${share}%` }}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 // ----------------------------------------------------------------
 // CategoryDashboardSection — category breakdown (current month) +
