@@ -33,6 +33,63 @@ export const CATEGORIES = [
   'Poistenie',
   'Iné',
 ] as const
+
+/** Default expense categories shown in the výdavky dropdown for new users. */
+export const VYDAVOK_STARTERS = [
+  'Potraviny',
+  'Reštaurácie',
+  'Káva',
+  'Tankovanie',
+  'Auto',
+  'Parkovanie',
+  'MHD a Taxi',
+  'Bývanie',
+  'Energie',
+  'Voda',
+  'Mobil a Internet',
+  'Streaming',
+  'Aplikácia',
+  'Lieky',
+  'Lekár',
+  'Drogéria',
+  'Oblečenie',
+  'Elektronika',
+  'Domácnosť',
+  'Zábava',
+  'Šport',
+  'Hotel',
+  'Letenka',
+  'Cestovanie',
+  'Poistenie',
+  'Hypotéka',
+  'Splátka úveru',
+  'Bankomat',
+  'Poplatok',
+  'Sporenie',
+  'Investícia',
+  'Charita',
+  'Darček',
+  'Vzdelávanie',
+  'Deti',
+  'Domáce zvieratá',
+  'Iné',
+] as const
+
+/** Default income categories shown in the príjmy dropdown for new users. */
+export const PRIJEM_STARTERS = [
+  'Mzda',
+  'Bonus',
+  'Dividenda',
+  'Refundácia',
+  'Vratka',
+  'Predaj',
+  'Dar',
+  'Náhrada',
+  'Úroky',
+  'Prevod medzi účtami',
+  'Stravné',
+  'Iné',
+] as const
 /** Category is now any short Slovak string up to 60 chars. */
 export type Category = string
 

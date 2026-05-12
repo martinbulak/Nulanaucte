@@ -64,6 +64,8 @@ export function Settings() {
 
       <ProfileSection me={me} onChange={load} />
       <BanksSection />
+      <CategoriesSection />
+      <ClippySection />
       <PasswordSection />
       <DataSection />
       <DangerSection />
@@ -346,6 +348,270 @@ function BanksSection() {
           Tvoju banku tu nevidíš? Pridaj si ju ručne v <code className="font-mono text-xs text-gold">/banky</code> ako
           „Iná banka (manuálne)" a pomenuj si ju ľubovoľne.
         </p>
+      </Card>
+    </div>
+  )
+}
+
+// ---------------- Categories registry ----------------
+
+interface RegistryItem {
+  id: number
+  name: string
+  type: 'vydavok' | 'prijem'
+  archived: boolean
+}
+
+interface RegistryResponse {
+  type: 'vydavok' | 'prijem'
+  categories: string[]
+  registry: RegistryItem[]
+  starters: string[]
+}
+
+function CategoriesSection() {
+  return (
+    <div className="reveal reveal-3">
+      <Card>
+        <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted mb-1">
+          ✦ Kategórie
+        </p>
+        <h2 className="font-heading text-xl text-text-primary tracking-wide mb-2">
+          Číselník kategórií
+        </h2>
+        <p className="font-body text-sm text-text-secondary mb-5">
+          Samostatné zoznamy pre <strong>výdavky</strong> a <strong>príjmy</strong>.
+          Vlastné názvy si pridáš, štandardné môžeš archivovať aby ti nezavadzali
+          v dropdowne. Existujúce transakcie si svoj label zachovajú.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <CategoryRegistryColumn type="vydavok" title="Výdavky" icon="☥" />
+          <CategoryRegistryColumn type="prijem" title="Príjmy" icon="⚜" />
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+function CategoryRegistryColumn({
+  type,
+  title,
+  icon,
+}: {
+  type: 'vydavok' | 'prijem'
+  title: string
+  icon: string
+}) {
+  const [data, setData] = useState<RegistryResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [adding, setAdding] = useState('')
+  const [busyId, setBusyId] = useState<number | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function load() {
+    setLoading(true)
+    const res = await apiFetch<RegistryResponse>(`/api/categories?type=${type}`)
+    if (res.ok) setData(res.data)
+    else setErr(res.error)
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    load()
+  }, [type])
+
+  async function addOne(e: FormEvent) {
+    e.preventDefault()
+    const name = adding.trim()
+    if (!name) return
+    setErr(null)
+    const res = await apiFetch<RegistryItem>('/api/categories', {
+      method: 'POST',
+      body: JSON.stringify({ name, type }),
+    })
+    if (res.ok) {
+      setAdding('')
+      await load()
+    } else {
+      setErr(res.error)
+    }
+  }
+
+  async function toggleArchive(item: RegistryItem) {
+    setBusyId(item.id)
+    setErr(null)
+    const res = await apiFetch<RegistryItem>(`/api/categories/${item.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ archived: !item.archived }),
+    })
+    setBusyId(null)
+    if (res.ok) await load()
+    else setErr(res.error)
+  }
+
+  if (loading) {
+    return (
+      <div className="border border-border-dim rounded-[3px] p-4">
+        <p className="font-heading text-xs uppercase tracking-widest text-gold flicker">
+          ✦ Načítavam…
+        </p>
+      </div>
+    )
+  }
+  if (!data) return null
+
+  // Custom registry rows for add/archive controls (active and archived).
+  const registryRows = data.registry
+  const inRegistry = new Set(registryRows.map((r) => r.name.toLowerCase()))
+  // Show starter labels that aren't in the registry yet — they're available
+  // in the dropdown via fallback but cannot be archived until added.
+  const startersOnly = data.starters.filter((s) => !inRegistry.has(s.toLowerCase()))
+
+  return (
+    <div className="border border-border-dim rounded-[3px] p-4 bg-stone/30">
+      <h3 className="font-heading text-sm uppercase tracking-widest text-gold-bright mb-3 flex items-center gap-2">
+        <span>{icon}</span>
+        <span>{title}</span>
+        <span className="font-ui text-[10px] text-text-muted normal-case tracking-normal italic ml-auto">
+          {data.categories.length} v dropdowne
+        </span>
+      </h3>
+
+      <form onSubmit={addOne} className="flex gap-2 mb-3">
+        <input
+          type="text"
+          value={adding}
+          onChange={(e) => setAdding(e.target.value)}
+          placeholder="napr. Káva, Cestovanie…"
+          maxLength={60}
+          className="flex-1 font-body text-sm text-text-primary bg-obsidian border border-border-dim rounded-[3px] px-3 py-2 outline-none focus:border-gold-bright placeholder:italic placeholder:text-text-muted"
+        />
+        <button
+          type="submit"
+          disabled={!adding.trim()}
+          className="font-heading text-[0.65rem] uppercase tracking-widest text-ink bg-gradient-to-br from-gold-bright via-gold to-gold-dim px-3 py-2 rounded-[3px] hover:-translate-y-px transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          + Pridať
+        </button>
+      </form>
+
+      {err && (
+        <p className="font-body text-xs text-crimson-bright mb-2">{err}</p>
+      )}
+
+      {/* User-added + active registry items */}
+      {registryRows.length > 0 && (
+        <div className="mb-3">
+          <p className="font-heading text-[0.55rem] uppercase tracking-widest text-text-muted mb-1.5">
+            Vlastné / spravované
+          </p>
+          <ul className="space-y-1">
+            {registryRows.map((it) => (
+              <li
+                key={it.id}
+                className={[
+                  'flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-[2px] border text-sm',
+                  it.archived
+                    ? 'border-border-dim bg-stone/40 text-text-muted line-through'
+                    : 'border-gold/30 bg-gold/5 text-text-primary',
+                  busyId === it.id ? 'opacity-50' : '',
+                ].join(' ')}
+              >
+                <span className="truncate font-body">{it.name}</span>
+                <button
+                  onClick={() => toggleArchive(it)}
+                  disabled={busyId === it.id}
+                  className="font-heading text-[0.55rem] uppercase tracking-widest text-text-muted hover:text-crimson-bright transition-colors shrink-0"
+                  title={it.archived ? 'Vrátiť späť do zoznamu' : 'Skryť z dropdownu'}
+                >
+                  {it.archived ? '↺ vrátiť' : '✕ skryť'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Starter labels not yet in registry — shown so user knows they're available */}
+      {startersOnly.length > 0 && (
+        <details className="text-xs">
+          <summary className="font-heading text-[0.55rem] uppercase tracking-widest text-text-muted cursor-pointer hover:text-gold-bright">
+            ▾ Štandardné ({startersOnly.length}) — sú v dropdowne automaticky
+          </summary>
+          <p className="font-ui italic text-text-muted text-[11px] mt-2 leading-relaxed">
+            {startersOnly.join(' · ')}
+          </p>
+          <p className="font-ui italic text-text-muted text-[10px] mt-2">
+            Skryť ich vieš tak že ich najprv pridáš („+ Pridať" s rovnakým menom)
+            a potom archivuješ.
+          </p>
+        </details>
+      )}
+    </div>
+  )
+}
+
+// ---------------- Clippy ----------------
+
+const CLIPPY_STORAGE_KEY = 'nu_clippy_dismissed_until'
+
+function ClippySection() {
+  const [dismissedUntil, setDismissedUntil] = useState<number | null>(() => {
+    try {
+      const raw = localStorage.getItem(CLIPPY_STORAGE_KEY)
+      if (!raw) return null
+      const n = parseInt(raw, 10)
+      return Number.isFinite(n) && n > Date.now() ? n : null
+    } catch {
+      return null
+    }
+  })
+
+  function restore() {
+    try {
+      localStorage.removeItem(CLIPPY_STORAGE_KEY)
+    } catch {
+      /* ignore */
+    }
+    setDismissedUntil(null)
+    // Force the widget to remount with fresh state by reloading the page —
+    // simpler than wiring a global event bus for one button.
+    window.location.reload()
+  }
+
+  return (
+    <div className="reveal reveal-3">
+      <Card>
+        <p className="font-heading text-[0.65rem] uppercase tracking-widest text-text-muted mb-1">
+          ✦ Raul v rohu
+        </p>
+        <h2 className="font-heading text-xl text-text-primary tracking-wide mb-2">
+          Raulove tipy
+        </h2>
+        <p className="font-body text-sm text-text-secondary mb-4">
+          Krátke vtipné tipy ktoré sa zobrazujú vpravo dole. Generujú sa, keď
+          klikneš <strong>„⚡ Spýtať sa Raula"</strong> na dashboarde —
+          z rovnakých dát ako dlhé odporúčania.
+        </p>
+
+        {dismissedUntil ? (
+          <div className="bg-stone/50 border border-border-dim border-l-[3px] border-l-gold-dim rounded-[3px] px-4 py-3 mb-3">
+            <p className="font-body text-sm text-text-secondary">
+              Tipy si si skryl do{' '}
+              <strong>{new Date(dismissedUntil).toLocaleString('sk-SK')}</strong>.
+              Klikni nižšie a Raul sa znova ozve.
+            </p>
+          </div>
+        ) : (
+          <p className="font-ui text-sm italic text-text-muted mb-3">
+            ✓ Tipy sú aktívne. Ak ich nevidíš, klikni „Spýtať sa Raula"
+            na dashboarde — pri prvej generácii sa naplnia.
+          </p>
+        )}
+
+        <button onClick={restore} className={GHOST_BTN}>
+          💡 Obnoviť Raulove tipy (reload)
+        </button>
       </Card>
     </div>
   )

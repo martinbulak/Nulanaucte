@@ -438,12 +438,14 @@ aiRoutes.post('/recommendations', aiExpensiveLimit, async (c) => {
  *
  * Returns the cached clippy tips for the given month. If none exist for the
  * requested month, falls back to the most recent month that DOES have cached
- * tips (so the mascot has something to show even if the user is browsing
- * older months). Empty tips array if nothing cached yet — widget hides.
+ * tips.
  *
- * Does NOT auto-generate — generation happens as a side-effect of
- * POST /api/ai/recommendations to keep all OpenAI cost gated behind the
- * user's explicit "Spýtať sa Raula" click.
+ * Auto-backfill: if NO tips are cached for any month BUT the user has at
+ * least one cached Raul recommendation, we one-shot-generate tips from that
+ * Raul rec's source data so the mascot starts working without requiring the
+ * user to manually click "Vygenerovať znovu". Counts as one expensive AI call
+ * — bounded by aiReadLimit + the inner generate is rate-bounded by the
+ * OpenAI key itself; we also short-circuit if there's no OpenAI key.
  */
 aiRoutes.get('/clippy-tips', aiReadLimit, async (c) => {
   const user = c.get('user')
@@ -457,6 +459,79 @@ aiRoutes.get('/clippy-tips', aiReadLimit, async (c) => {
     if (fallback) {
       period = fallback
       tips = await getClippyTips(user.id, fallback)
+    }
+  }
+
+  // Auto-backfill: still nothing? See if a Raul rec exists we can derive
+  // tips from. Pick the most recent month for which we have a rec AND
+  // transactions. One-shot generation, cached for next time.
+  if (!tips || tips.length === 0) {
+    try {
+      const allMonths = (await listTransactions(user.id))
+        .map((t) => t.date.slice(0, 7))
+      const monthsSet = [...new Set(allMonths)].sort().reverse()
+      for (const m of monthsSet.slice(0, 6)) {
+        const rec = await getLatestRecommendation(user.id, m)
+        if (!rec) continue
+        // Build the same input the Raul POST flow uses, run the clippy
+        // generator, cache + return.
+        const prev = shiftMonth(m, -1)
+        const [monthTxs, byCategory, byCategoryPrev] = await Promise.all([
+          listTransactions(user.id, { month: m }),
+          categorySummary(user.id, m, 'vydavok'),
+          categorySummary(user.id, prev, 'vydavok'),
+        ])
+        if (monthTxs.length === 0) continue
+        const totalIncome = monthTxs
+          .filter((t) => t.type === 'prijem')
+          .reduce((s, t) => s + t.amount, 0)
+        const totalExpense = monthTxs
+          .filter((t) => t.type === 'vydavok')
+          .reduce((s, t) => s + t.amount, 0)
+        const isOther = (cat: string) => cat.trim().toLowerCase() === 'iné'
+        const byCatFiltered = byCategory.filter((x) => !isOther(x.category))
+        const byCatPrevFiltered = byCategoryPrev.filter((x) => !isOther(x.category))
+        const prevMap = new Map(byCatPrevFiltered.map((x) => [x.category, x.total]))
+        const changeVsLast = byCatFiltered
+          .map((x) => {
+            const p = prevMap.get(x.category) ?? 0
+            const delta = x.total - p
+            const pct = p > 0 ? (delta / p) * 100 : x.total > 0 ? 100 : 0
+            return { category: x.category, delta, pct }
+          })
+          .filter((x) => Math.abs(x.pct) >= 20)
+          .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+          .slice(0, 4)
+        const largestTransactions = monthTxs
+          .filter((t) => t.type === 'vydavok' && !isOther(t.category))
+          .sort((a, b) => b.amount - a.amount)
+          .slice(0, 4)
+          .map((t) => ({
+            note: t.note?.slice(0, 80) ?? '—',
+            amount: t.amount,
+            date: t.date,
+            category: t.category,
+          }))
+        const result = await generateClippyTips({
+          monthLabel: m,
+          totalIncome,
+          totalExpense,
+          topCategories: byCatFiltered.slice(0, 5),
+          changeVsLast,
+          largestTransactions,
+        })
+        if (result.tips.length > 0) {
+          await saveClippyTips(user.id, m, result.tips)
+          period = m
+          tips = result.tips
+        }
+        break // try only the most recent month with a rec
+      }
+    } catch (e) {
+      console.warn(
+        '[ai] clippy backfill failed:',
+        e instanceof Error ? e.message : e,
+      )
     }
   }
 

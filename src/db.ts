@@ -86,6 +86,25 @@ export async function ensureSeeded(): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS clippy_tips_user_period_uq
       ON clippy_tips(user_id, period)
   `)
+  // Category registry — separate "číselník" per (user, type='vydavok'|'prijem').
+  // Lets the user maintain a curated list of expense and income categories
+  // independently. Archived rows stay in DB but are hidden from dropdowns.
+  // Names are unique per (user, type, lower(name)) — case-insensitive to
+  // avoid "Potraviny" vs "potraviny" duplicates from sloppy typing.
+  await db.execute(sqlOp`
+    CREATE TABLE IF NOT EXISTS category_registry (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      archived BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sqlOp`
+    CREATE UNIQUE INDEX IF NOT EXISTS category_registry_user_type_name_uq
+      ON category_registry(user_id, type, lower(name))
+  `)
 
   // Check whether the seed user already exists (case-insensitive)
   const existing = await findUserByEmail('koduvanica')
@@ -631,20 +650,122 @@ export async function applyRulesToTransactions(
   return new Set(updates.map((u) => u.id))
 }
 
-/** All distinct categories used by this user, sorted by most-frequent. */
-export async function listUserCategories(userId: number): Promise<string[]> {
+/**
+ * All distinct categories used by this user, sorted by most-frequent.
+ * Optional `type` filter restricts to expense / income transactions —
+ * lets the výdavky / príjmy dropdowns show only relevant categories.
+ */
+export async function listUserCategories(
+  userId: number,
+  type?: 'vydavok' | 'prijem',
+): Promise<string[]> {
+  const conds = [eq(transactions.userId, userId)]
+  if (type) conds.push(eq(transactions.type, type))
   const rows = await db
     .select({
       category: transactions.category,
       cnt: sqlOp<number>`count(*)::int`,
     })
     .from(transactions)
-    .where(eq(transactions.userId, userId))
+    .where(and(...conds))
     .groupBy(transactions.category)
   return rows
     .filter((r) => r.category && r.category !== 'Nezaradené')
     .sort((a, b) => Number(b.cnt) - Number(a.cnt))
     .map((r) => r.category)
+}
+
+// ---------------- CATEGORY REGISTRY ----------------
+//
+// User-curated lists of expense + income categories. Used by the dropdowns
+// in /vydavky and /prijmy. Stored separately from transactions.category
+// (which is free-text per row) — registry is "what's offered as a suggestion"
+// while a transaction can still hold a custom or archived label.
+
+export interface CategoryRegistryItem {
+  id: number
+  userId: number
+  name: string
+  type: 'vydavok' | 'prijem'
+  archived: boolean
+  createdAt: string
+}
+
+interface RegistryRow extends Record<string, unknown> {
+  id: number
+  user_id: number
+  name: string
+  type: string
+  archived: boolean
+  created_at: Date
+}
+
+function rowToRegistry(r: RegistryRow): CategoryRegistryItem {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    name: r.name,
+    type: r.type as 'vydavok' | 'prijem',
+    archived: r.archived,
+    createdAt:
+      r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+  }
+}
+
+export async function listCategoryRegistry(
+  userId: number,
+  type?: 'vydavok' | 'prijem',
+): Promise<CategoryRegistryItem[]> {
+  const rows = type
+    ? await db.execute<RegistryRow>(sqlOp`
+        SELECT id, user_id, name, type, archived, created_at
+        FROM category_registry
+        WHERE user_id = ${userId} AND type = ${type}
+        ORDER BY archived ASC, lower(name) ASC
+      `)
+    : await db.execute<RegistryRow>(sqlOp`
+        SELECT id, user_id, name, type, archived, created_at
+        FROM category_registry
+        WHERE user_id = ${userId}
+        ORDER BY type ASC, archived ASC, lower(name) ASC
+      `)
+  return rows.rows.map(rowToRegistry)
+}
+
+export async function addCategoryToRegistry(input: {
+  userId: number
+  name: string
+  type: 'vydavok' | 'prijem'
+}): Promise<CategoryRegistryItem | null> {
+  const name = input.name.trim().slice(0, 60)
+  if (name.length < 2) return null
+  const normalized = name.charAt(0).toUpperCase() + name.slice(1)
+  try {
+    const rows = await db.execute<RegistryRow>(sqlOp`
+      INSERT INTO category_registry (user_id, name, type)
+      VALUES (${input.userId}, ${normalized}, ${input.type})
+      ON CONFLICT (user_id, type, lower(name))
+        DO UPDATE SET archived = FALSE
+      RETURNING id, user_id, name, type, archived, created_at
+    `)
+    return rows.rows[0] ? rowToRegistry(rows.rows[0]) : null
+  } catch (e) {
+    console.error('[db] addCategoryToRegistry:', e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
+export async function setCategoryArchived(
+  userId: number,
+  id: number,
+  archived: boolean,
+): Promise<CategoryRegistryItem | null> {
+  const rows = await db.execute<RegistryRow>(sqlOp`
+    UPDATE category_registry SET archived = ${archived}
+    WHERE user_id = ${userId} AND id = ${id}
+    RETURNING id, user_id, name, type, archived, created_at
+  `)
+  return rows.rows[0] ? rowToRegistry(rows.rows[0]) : null
 }
 
 /** Aggregated category totals for a month (used by Raul + dashboard). */

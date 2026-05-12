@@ -95,12 +95,13 @@ export function TransactionsPage({ type }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Load category list once (combobox source)
+  // Load type-scoped category list (combobox source). Refetch when the page
+  // type changes so výdavky and príjmy each see their own číselník.
   useEffect(() => {
-    apiFetch<{ categories: string[] }>('/api/ai/categories').then((res) => {
+    apiFetch<{ categories: string[] }>(`/api/categories?type=${type}`).then((res) => {
       if (res.ok && res.data.categories.length > 0) setCategories(res.data.categories)
     })
-  }, [])
+  }, [type])
 
   const load = useCallback(
     async (m: string) => {
