@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef, ChangeEvent } from 'react'
 import { Card } from '../components/ui/Card'
-import { InboundEmailWidget } from '../components/ui/InboundEmailWidget'
 import { apiFetch } from '../utils/api'
 import { extractPdfText } from '../utils/pdf'
 
@@ -129,11 +128,6 @@ export function Banky() {
           <p className="font-body text-sm text-text-secondary mt-0.5">{err}</p>
         </div>
       )}
-
-      {/* Inbound email — automatic import via Resend */}
-      <div className="mb-8 reveal reveal-2">
-        <InboundEmailWidget />
-      </div>
 
       {/* Summary strip */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">

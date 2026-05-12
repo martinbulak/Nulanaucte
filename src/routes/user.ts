@@ -5,13 +5,11 @@ import {
   bumpTokenVersion,
   deleteUser,
   findUserById,
-  regenerateInboundToken,
   setUserPassword,
   updateProfile,
 } from '../db.js'
 import { verifyPassword } from '../lib/password.js'
 import { COOKIE_NAME } from '../lib/jwt.js'
-import { env } from '../env.js'
 import type { ReportFrequency } from '../types.js'
 
 export const userRoutes = new Hono()
@@ -19,44 +17,6 @@ export const userRoutes = new Hono()
 userRoutes.use('*', requireAuth)
 
 const PASSWORD_MIN = 12
-
-function buildAddress(slug: string, token: string): string {
-  return `${slug}-${token}@${env.INBOUND_DOMAIN}`
-}
-
-// ---------------- Inbound email widget ----------------
-
-userRoutes.get('/inbound', async (c) => {
-  const session = c.get('user')
-  const user = await findUserById(session.id)
-  if (!user) return c.json({ ok: false, error: 'User not found' }, 404)
-  return c.json({
-    ok: true,
-    data: {
-      address: buildAddress(user.inboundSlug, user.inboundToken),
-      slug: user.inboundSlug,
-      token: user.inboundToken,
-      domain: env.INBOUND_DOMAIN,
-      configured: env.INBOUND_DOMAIN !== 'inbox.local',
-    },
-  })
-})
-
-userRoutes.post('/inbound/regenerate', async (c) => {
-  const session = c.get('user')
-  const newToken = await regenerateInboundToken(session.id)
-  if (!newToken) return c.json({ ok: false, error: 'User not found' }, 404)
-  const user = (await findUserById(session.id))!
-  return c.json({
-    ok: true,
-    data: {
-      address: buildAddress(user.inboundSlug, newToken),
-      slug: user.inboundSlug,
-      token: newToken,
-      domain: env.INBOUND_DOMAIN,
-    },
-  })
-})
 
 // ---------------- Profile ----------------
 

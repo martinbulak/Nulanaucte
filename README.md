@@ -38,10 +38,9 @@ Deploy target: **Vercel**.
 ### Bezpečnosť
 - httpOnly secure SameSite=Strict cookies + JWT s tokenVersion revocation
 - PBKDF2 600k pre heslá, constant-time login (anti-timing)
-- Rate limiting per-IP (login, register, forgot, AI, inbound)
+- Rate limiting per-IP (login, register, forgot, AI)
 - Account lockout po 5 zlých pokusoch
-- Body size limits (10 MB inbound, 8 MB import)
-- Webhook HMAC signing (Svix) + replay protection (5min window)
+- Body size limits (8 MB import)
 - CSP, HSTS, X-Frame-Options cez `vercel.json`
 - 37 audit findings z [SECURITY_AUDIT.md](./SECURITY_AUDIT.md), všetky CRITICAL + HIGH fixnuté
 
@@ -62,12 +61,10 @@ DATABASE_URL=postgresql://neondb_owner:...@ep-xxx.neon.tech/neondb?sslmode=requi
 
 # Required only in production (dev má fallbacky)
 JWT_SECRET=                          # openssl rand -base64 48 (≥32 chars)
-INBOUND_WEBHOOK_SECRET=              # whsec_... z Resend dashboardu
 RESEND_API_KEY=                      # re_... z Resend
 OPENAI_API_KEY=                      # sk-... z OpenAI
 
 # Optional
-INBOUND_DOMAIN=nula.tvojadomena.sk   # default: inbox.local
 PUBLIC_ORIGIN=http://localhost:8787  # default: localhost:8787
 EMAIL_FROM=Nula na účte <noreply@nula.tvojadomena.sk>
 CRON_SECRET=                         # ochrana POST /api/reports/run/* (prod)
@@ -116,25 +113,19 @@ Pridaj všetky required env vars (pozri tabuľku vyššie). Vygeneruj:
 - `JWT_SECRET` — `openssl rand -base64 48`
 - `CRON_SECRET` — `openssl rand -hex 32`
 
-### 4. Resend Inbound (pre automatický email import)
-- Pridaj doménu v Resend dashboarde + DNS verifikácia (TXT)
-- MX record subdomény `nula.tvojadomena.sk` → `feedback-smtp.eu-west-1.amazonses.com` (pozri Resend docs)
-- Inbound rule: catch-all `*@nula.tvojadomena.sk` → POST `https://nula-na-ucte.vercel.app/api/inbound/email`
-- Skopíruj webhook signing secret → `INBOUND_WEBHOOK_SECRET`
-
-### 5. Cron jobs
+### 4. Cron jobs
 `vercel.json` už definuje:
 - **Pondelok 8:00 UTC** — týždenné reporty
 - **1. v mesiaci 8:00 UTC** — mesačné reporty
 
 Nastaví sa automaticky pri deploy. Pozri Vercel → Project → Cron Jobs.
 
-### 6. Test produkcie
+### 5. Test produkcie
 ```bash
 curl https://nula-na-ucte.vercel.app/api/auth/me  # má vrátiť 401
 ```
 
-### 7. Promote first admin
+### 6. Promote first admin
 V Neon SQL Editori:
 ```sql
 UPDATE users SET role = 'admin' WHERE email = 'admin@example.com';
@@ -167,10 +158,9 @@ src/
 │  └─ parser-utils.ts  ← SK formát čísel, dátumov
 └─ routes/
    ├─ auth.ts          ← login/register/verify/forgot/reset/logout
-   ├─ user.ts          ← profile, password change, account deletion, inbound widget
+   ├─ user.ts          ← profile, password change, account deletion
    ├─ banks.ts         ← CRUD bánk
    ├─ imports.ts       ← CSV/PDF upload + parser
-   ├─ inbound.ts       ← Resend webhook → parse → store
    ├─ ai.ts            ← /api/ai/categorize, /api/ai/recommendations
    ├─ mortgages.ts     ← CRUD hypoték
    ├─ reports.ts       ← cron endpoints + email render
@@ -227,8 +217,6 @@ POST   /api/auth/forgot         password reset request
 POST   /api/auth/reset          consume reset token
 
 # User
-GET    /api/user/inbound        per-user email address
-POST   /api/user/inbound/regenerate
 PATCH  /api/user/profile        name, frequency, notifs
 POST   /api/user/change-password
 DELETE /api/user                account deletion + cascade
@@ -252,7 +240,6 @@ POST   /api/imports/csv/preview
 POST   /api/imports/csv
 POST   /api/imports/pdf/preview
 POST   /api/imports/pdf
-POST   /api/inbound/email       Resend webhook (HMAC signed)
 
 # AI
 GET    /api/ai/categories       list of allowed categories

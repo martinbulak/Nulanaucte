@@ -5,7 +5,6 @@ import { authRoutes } from './routes/auth.js'
 import { banksRoutes } from './routes/banks.js'
 import { importsRoutes } from './routes/imports.js'
 import { mortgagesRoutes } from './routes/mortgages.js'
-import { inboundRoutes } from './routes/inbound.js'
 import { userRoutes } from './routes/user.js'
 import { aiRoutes } from './routes/ai.js'
 import { reportsRoutes } from './routes/reports.js'
@@ -62,8 +61,6 @@ app.route('/api/user', userRoutes)
 app.route('/api/ai', aiRoutes)
 app.route('/api/reports', reportsRoutes)
 app.route('/api/admin', adminRoutes)
-// Public webhook (no auth — verified via Svix HMAC at the route level)
-app.route('/api/inbound', inboundRoutes)
 
 function parseMonth(raw: string | undefined): string | undefined {
   if (!raw) return undefined

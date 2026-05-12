@@ -134,25 +134,6 @@ export async function findUserById(id: number): Promise<User | undefined> {
   return r ? rowToUser(r) : undefined
 }
 
-export async function findUserByInboundToken(token: string): Promise<User | undefined> {
-  if (!token) return undefined
-  const [r] = await db
-    .select()
-    .from(users)
-    .where(sqlOp`lower(${users.inboundToken}) = lower(${token})`)
-    .limit(1)
-  return r ? rowToUser(r) : undefined
-}
-
-export async function regenerateInboundToken(userId: number): Promise<string | null> {
-  const newToken = generateToken()
-  const [r] = await db
-    .update(users)
-    .set({ inboundToken: newToken })
-    .where(eq(users.id, userId))
-    .returning({ inboundToken: users.inboundToken })
-  return r?.inboundToken ?? null
-}
 
 export async function bumpTokenVersion(userId: number): Promise<number | null> {
   const [r] = await db

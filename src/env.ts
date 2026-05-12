@@ -4,12 +4,17 @@
  *
  * Hard requirements in production:
  *   - JWT_SECRET (>= 32 chars)
- *   - INBOUND_WEBHOOK_SECRET (Resend / Svix shared secret)
+ *   - DATABASE_URL
+ *   - RESEND_API_KEY (verify / reset emails + weekly/monthly reports)
  *
  * Soft (defaults):
- *   - INBOUND_DOMAIN (defaults to "inbox.local" in dev)
  *   - PUBLIC_ORIGIN (defaults to "http://localhost:8787" in dev)
  *   - NODE_ENV (defaults to "development")
+ *
+ * Optional:
+ *   - OPENAI_API_KEY (AI categorization & Raul recommendations; stubbed if missing)
+ *   - EMAIL_FROM (defaults to a placeholder; should be set in prod)
+ *   - CRON_SECRET (protects /api/reports/run/* cron endpoints)
  */
 
 const _env: Record<string, string | undefined> =
@@ -58,27 +63,6 @@ if (jwtRaw && jwtRaw.length >= 32) {
   )
 }
 
-// INBOUND_WEBHOOK_SECRET — recommended in production but not boot-blocker.
-// If missing in prod, the inbound webhook route itself will reject all requests
-// with 401 (see src/routes/inbound.ts → verifyWebhook). This lets the app boot
-// before Resend is fully configured.
-let inboundWebhookSecret: string | null = null
-const inboundRaw = _env.INBOUND_WEBHOOK_SECRET
-if (inboundRaw && inboundRaw.trim() !== '') {
-  inboundWebhookSecret = inboundRaw
-} else if (isProd) {
-  // eslint-disable-next-line no-console
-  console.warn(
-    '[env] INBOUND_WEBHOOK_SECRET not set in production — inbound email webhook ' +
-      'will reject all requests until set. App boot continues.',
-  )
-} else {
-  // eslint-disable-next-line no-console
-  console.warn(
-    '[env] INBOUND_WEBHOOK_SECRET not set — accepting unsigned webhooks in DEV ONLY.',
-  )
-}
-
 // DATABASE_URL — required everywhere (Postgres / Neon connection string).
 const databaseUrl = required('DATABASE_URL', { minLen: 20 })
 
@@ -107,8 +91,6 @@ export const env = {
   NODE_ENV,
   isProd,
   JWT_SECRET: jwtSecret,
-  INBOUND_WEBHOOK_SECRET: inboundWebhookSecret,
-  INBOUND_DOMAIN: optional('INBOUND_DOMAIN', 'inbox.local'),
   PUBLIC_ORIGIN: optional('PUBLIC_ORIGIN', 'http://localhost:8787'),
   DATABASE_URL: databaseUrl,
   RESEND_API_KEY: resendApiKey,
